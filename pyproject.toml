@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rk3562deb-dashboard"
+version = "0.1.0"
+description = "Local btop-inspired dashboard for Debian on RK3562/Rockchip devices"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "GeospatialDaryl" }]
+keywords = ["rk3562", "rockchip", "debian", "dashboard", "monitoring"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: System :: Monitoring",
+]
+
+[project.scripts]
+rk-dashboard = "rk3562deb_dashboard.server:main"
+
+[tool.setuptools]
+packages = ["rk3562deb_dashboard"]
+
+[tool.setuptools.package-data]
+rk3562deb_dashboard = ["static/*", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
