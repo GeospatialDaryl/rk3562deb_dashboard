@@ -84,6 +84,7 @@ function renderThermal(thermal) {
   const temps = (thermal || []).map((zone) => zone.temperature_c).filter((temp) => temp !== null);
   const max = temps.length ? Math.max(...temps) : null;
   $("thermal-max").textContent = max === null ? "n/a" : `${formatter.format(max)}°C`;
+  $("thermal-max").className = `metric-big${max >= 80 ? " metric-alert" : max >= 70 ? " metric-warn" : ""}`;
   $("thermal-list").innerHTML = (thermal || []).map((zone) => `
     <div class="row">
       <strong>${esc(zone.name)}</strong>
@@ -148,6 +149,9 @@ function renderPower(power) {
 function renderBlockIo(blocks) {
   const sd = (blocks || []).find((device) => device.kind === "SD");
   $("sd-written").textContent = sd ? bytes(sd.written_bytes_total) : "n/a";
+  const sdWritten = sd ? sd.written_bytes_total : 0;
+  $("sd-written").className =
+    `metric-big${sdWritten > 100 * 1024 * 1024 ? " metric-alert" : sdWritten > 0 ? " metric-warn" : ""}`;
   $("block-io-list").innerHTML = (blocks || []).map((device) => `
     <div class="row table-row">
       <div><strong>${esc(device.name)}</strong><small>${esc(device.kind === "MMC" ? "eMMC" : device.kind || "disk")}</small></div>
@@ -277,5 +281,26 @@ async function refresh() {
   }
 }
 
-refresh();
-setInterval(refresh, 2000);
+// Pause polling while the page is hidden (blanked kiosk screen, background
+// tab) so an always-on display costs nothing when nobody is looking.
+let pollTimer = null;
+
+function startPolling() {
+  if (pollTimer === null) {
+    refresh();
+    pollTimer = setInterval(refresh, 2000);
+  }
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopPolling(); else startPolling();
+});
+
+startPolling();
