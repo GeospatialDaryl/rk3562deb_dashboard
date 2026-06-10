@@ -120,6 +120,24 @@ function renderRockchip(rockchip) {
   $("rockchip-list").innerHTML = devfreq + regulators + storage || `<p class="muted">Rockchip-specific sysfs data is not exposed on this host.</p>`;
 }
 
+function renderPower(power) {
+  const supplies = (power?.supplies || []);
+  const battery = supplies.find((s) => s.capacity_percent !== null && s.capacity_percent !== undefined);
+  $("power-capacity").textContent = battery ? percent(battery.capacity_percent) : "n/a";
+  $("power-list").innerHTML = supplies.map((supply) => `
+    <div class="row">
+      <strong>${supply.name}</strong>
+      <small>${[
+        supply.type,
+        supply.status,
+        supply.capacity_percent !== null && supply.capacity_percent !== undefined ? percent(supply.capacity_percent) : null,
+        supply.voltage_uv != null ? `${formatter.format(supply.voltage_uv / 1_000_000)} V` : null,
+        supply.current_ua != null ? `${formatter.format(Math.abs(supply.current_ua) / 1_000)} mA` : null,
+      ].filter(Boolean).join(" · ")}</small>
+    </div>
+  `).join("") || `<p class="muted">No power supplies exposed by sysfs.</p>`;
+}
+
 function renderProcesses(processes) {
   $("process-count").textContent = processes.count || 0;
   $("process-list").innerHTML = (processes.top_memory || []).map((proc) => `
@@ -139,6 +157,7 @@ function render(snapshot) {
   renderNetwork(snapshot.network);
   renderRockchip(snapshot.rockchip);
   renderProcesses(snapshot.processes);
+  renderPower(snapshot.power);
 }
 
 async function refresh() {

@@ -70,7 +70,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Run the local RK3562 Debian dashboard")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", default=8765, type=int, help="Bind port (default: 8765)")
     parser.add_argument(
         "--root",
@@ -84,7 +84,7 @@ def build_parser() -> ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     server = DashboardServer((args.host, args.port), args.root)
-    url = f"http://{args.host}:{args.port}"
+    url = f"http://{args.host if args.host != '0.0.0.0' else '127.0.0.1'}:{args.port}"
     print(f"RK3562 Debian dashboard listening on {url}")
     try:
         server.serve_forever()
