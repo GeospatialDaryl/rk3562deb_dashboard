@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from argparse import ArgumentParser
+from collections import deque
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,20 +15,81 @@ from urllib.parse import urlparse
 from .collectors import CollectorState, collect_snapshot
 
 STATIC_DIR = Path(__file__).with_name("static")
+SAMPLE_INTERVAL_SECONDS = 2.0
+HISTORY_SIZE = 300  # 10 minutes at the default interval
+
+
+def history_point(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a snapshot to the compact series the sparklines consume."""
+
+    temps = [
+        zone["temperature_c"]
+        for zone in snapshot.get("thermal", [])
+        if zone.get("temperature_c") is not None
+    ]
+    sd_write = emmc_write = None
+    for device in snapshot.get("block_io", []):
+        if device.get("kind") == "SD" and sd_write is None:
+            sd_write = device["write_bytes_per_sec"]
+        elif device.get("kind") == "MMC" and emmc_write is None:
+            emmc_write = device["write_bytes_per_sec"]
+    return {
+        "t": snapshot["timestamp"],
+        "cpu": snapshot["cpu"]["total"].get("usage_percent"),
+        "mem": snapshot["memory"].get("usage_percent"),
+        "temp": max(temps) if temps else None,
+        "sd_write": sd_write,
+        "emmc_write": emmc_write,
+    }
 
 
 class DashboardServer(ThreadingHTTPServer):
-    """Threaded HTTP server that owns collector state."""
+    """Threaded HTTP server with a background sampler owning collector state.
 
-    def __init__(self, server_address: tuple[str, int], root: Path = Path("/")) -> None:
+    A single sampler thread collects every SAMPLE_INTERVAL_SECONDS so rates are
+    computed over a steady interval regardless of how many clients poll, and a
+    ring buffer of compact points feeds the history API. Requests serve the
+    cached snapshot.
+    """
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        root: Path = Path("/"),
+        sample_interval: float = SAMPLE_INTERVAL_SECONDS,
+    ) -> None:
         super().__init__(server_address, DashboardRequestHandler)
+        self.root = root
+        self.sample_interval = sample_interval
         self.collector_state = CollectorState()
         self.collector_lock = threading.Lock()
-        self.root = root
+        self.history: deque[dict[str, Any]] = deque(maxlen=HISTORY_SIZE)
+        self._latest = collect_snapshot(self.collector_state, root)
+        self.history.append(history_point(self._latest))
+        self._stop_sampler = threading.Event()
+        self._sampler = threading.Thread(
+            target=self._sample_loop, name="dashboard-sampler", daemon=True
+        )
+        self._sampler.start()
 
     def snapshot(self) -> dict[str, Any]:
         with self.collector_lock:
-            return collect_snapshot(self.collector_state, self.root)
+            return self._latest
+
+    def history_points(self) -> dict[str, Any]:
+        with self.collector_lock:
+            return {"interval_seconds": self.sample_interval, "points": list(self.history)}
+
+    def _sample_loop(self) -> None:
+        while not self._stop_sampler.wait(self.sample_interval):
+            snapshot = collect_snapshot(self.collector_state, self.root)
+            with self.collector_lock:
+                self._latest = snapshot
+                self.history.append(history_point(snapshot))
+
+    def server_close(self) -> None:
+        self._stop_sampler.set()
+        super().server_close()
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
@@ -42,6 +104,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/snapshot":
             self._send_json(self.server.snapshot())
+            return
+        if parsed.path == "/api/history":
+            self._send_json(self.server.history_points())
             return
         if parsed.path == "/healthz":
             self._send_json({"ok": True})

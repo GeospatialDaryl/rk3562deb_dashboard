@@ -53,17 +53,23 @@ sudo systemctl enable --now rk-dashboard
 
 ## API
 
-The UI consumes a single endpoint:
+The UI consumes two endpoints:
 
 ```text
 GET /api/snapshot
+GET /api/history
 ```
 
-The response is a JSON object with these top-level keys:
+The snapshot response is a JSON object with these top-level keys:
 
 ```text
 timestamp, host, cpu, memory, swap, processes, disks, block_io, network, thermal, power, npu, rockchip
 ```
+
+A background sampler collects every 2 seconds and keeps the last 10 minutes in
+memory (never on disk). `/api/history` returns that ring buffer as compact
+points (`t, cpu, mem, temp, sd_write, emmc_write`), which the UI renders as
+sparklines on the CPU, thermal, and storage cards.
 
 This makes it straightforward to add terminal, kiosk, or Prometheus exporter integrations later without rewriting collectors.
 
@@ -88,3 +94,4 @@ mypy rk3562deb_dashboard tests
 - **Safe failure mode:** collectors handle missing files and permissions without breaking the page.
 - **Testable collectors:** every collector accepts an alternate filesystem root so procfs/sysfs fixtures can be tested without privileged host access.
 - **Separation of concerns:** Python gathers normalized metrics; the frontend renders and refreshes the dashboard every two seconds.
+- **RAM-only history:** the 10-minute metric history lives in a fixed-size in-memory ring buffer, consistent with keeping the SD card free of write traffic.

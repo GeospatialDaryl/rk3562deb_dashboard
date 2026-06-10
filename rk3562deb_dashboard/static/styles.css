@@ -173,6 +173,17 @@ h2 { font-size: 1rem; letter-spacing: -0.02em; }
   gap: 12px;
 }
 
+.spark {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 12px;
+}
+
+.spark-legend { font-size: 0.74rem; margin-top: 4px; }
+.legend-sd { color: var(--red); }
+.legend-emmc { color: var(--cyan); }
+
 .load-strip {
   display: grid;
   grid-template-columns: repeat(3, 64px);

@@ -31,6 +31,7 @@
           <span id="cpu-total" class="metric-big">--%</span>
         </div>
         <div class="bar"><span id="cpu-bar"></span></div>
+        <canvas id="cpu-spark" class="spark" height="44"></canvas>
         <div id="cpu-cores" class="core-grid"></div>
       </section>
 
@@ -48,6 +49,7 @@
           <h2 id="thermal-title">Thermals</h2>
           <span id="thermal-max" class="metric-big">--°C</span>
         </div>
+        <canvas id="thermal-spark" class="spark" height="44"></canvas>
         <div id="thermal-list" class="stack"></div>
       </section>
 
@@ -97,6 +99,8 @@
           <span id="sd-written" class="metric-big">--</span>
         </div>
         <p class="muted">SD writes since boot — should stay low if write-reduction is working</p>
+        <canvas id="write-spark" class="spark" height="44"></canvas>
+        <p class="muted spark-legend">write rate · <span class="legend-sd">SD</span> · <span class="legend-emmc">eMMC</span></p>
         <div id="block-io-list" class="table-list"></div>
       </section>
 

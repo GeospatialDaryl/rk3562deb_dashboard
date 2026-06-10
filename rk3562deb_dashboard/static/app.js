@@ -210,12 +210,65 @@ function render(snapshot) {
   renderNpu(snapshot.npu);
 }
 
+function drawSparkline(canvasId, series, options = {}) {
+  const canvas = $(canvasId);
+  if (!canvas || !canvas.clientWidth) return;
+  const scale = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * scale;
+  canvas.height = 44 * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  const width = canvas.clientWidth;
+  const height = 44;
+  ctx.clearRect(0, 0, width, height);
+
+  const lines = series.filter((line) => line.values.some((value) => value != null));
+  if (!lines.length) return;
+  const all = lines.flatMap((line) => line.values).filter((value) => value != null);
+  const min = options.min ?? Math.min(...all);
+  const max = Math.max(options.minSpan ?? 0, ...all.map((value) => value - min)) + min;
+  const span = Math.max(max - min, 1e-9);
+  const count = Math.max(...lines.map((line) => line.values.length));
+
+  for (const line of lines) {
+    ctx.beginPath();
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = 1.5;
+    let started = false;
+    line.values.forEach((value, index) => {
+      if (value == null) { started = false; return; }
+      const x = count > 1 ? (index / (count - 1)) * width : width;
+      const y = height - 3 - ((value - min) / span) * (height - 6);
+      if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; }
+    });
+    ctx.stroke();
+  }
+}
+
+function renderHistory(history) {
+  const points = history?.points || [];
+  drawSparkline("cpu-spark", [
+    { values: points.map((point) => point.cpu), color: "#42d9f5" },
+  ], { min: 0, minSpan: 100 });
+  drawSparkline("thermal-spark", [
+    { values: points.map((point) => point.temp), color: "#f7d774" },
+  ], { minSpan: 5 });
+  drawSparkline("write-spark", [
+    { values: points.map((point) => point.emmc_write), color: "#42d9f5" },
+    { values: points.map((point) => point.sd_write), color: "#ff6b81" },
+  ], { min: 0, minSpan: 1024 });
+}
+
 async function refresh() {
   const connection = $("connection");
   try {
-    const response = await fetch("/api/snapshot", { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    render(await response.json());
+    const [snapshotResponse, historyResponse] = await Promise.all([
+      fetch("/api/snapshot", { cache: "no-store" }),
+      fetch("/api/history", { cache: "no-store" }),
+    ]);
+    if (!snapshotResponse.ok) throw new Error(`HTTP ${snapshotResponse.status}`);
+    render(await snapshotResponse.json());
+    if (historyResponse.ok) renderHistory(await historyResponse.json());
     connection.textContent = `Live · ${new Date().toLocaleTimeString()}`;
     connection.className = "status-pill online";
   } catch (error) {
