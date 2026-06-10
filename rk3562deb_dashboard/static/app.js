@@ -145,6 +145,18 @@ function renderPower(power) {
   `).join("") || `<p class="muted">No power supplies exposed by sysfs.</p>`;
 }
 
+function renderBlockIo(blocks) {
+  const sd = (blocks || []).find((device) => device.kind === "SD");
+  $("sd-written").textContent = sd ? bytes(sd.written_bytes_total) : "n/a";
+  $("block-io-list").innerHTML = (blocks || []).map((device) => `
+    <div class="row table-row">
+      <div><strong>${esc(device.name)}</strong><small>${esc(device.kind === "MMC" ? "eMMC" : device.kind || "disk")}</small></div>
+      <div>W ${bytes(device.written_bytes_total)} · R ${bytes(device.read_bytes_total)}</div>
+      <small>W ${bytes(device.write_bytes_per_sec)}/s · R ${bytes(device.read_bytes_per_sec)}/s</small>
+    </div>
+  `).join("") || `<p class="muted">No block devices found.</p>`;
+}
+
 function renderProcesses(processes) {
   $("process-count").textContent = processes.count || 0;
   $("process-list").innerHTML = (processes.top_memory || []).map((proc) => `
@@ -161,6 +173,7 @@ function render(snapshot) {
   renderMemory(snapshot.memory, snapshot.swap);
   renderThermal(snapshot.thermal);
   renderDisks(snapshot.disks);
+  renderBlockIo(snapshot.block_io);
   renderNetwork(snapshot.network);
   renderRockchip(snapshot.rockchip);
   renderProcesses(snapshot.processes);

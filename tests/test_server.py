@@ -18,6 +18,7 @@ SNAPSHOT_KEYS = (
     "swap",
     "processes",
     "disks",
+    "block_io",
     "network",
     "thermal",
     "power",

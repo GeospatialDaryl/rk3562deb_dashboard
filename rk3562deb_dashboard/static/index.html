@@ -90,6 +90,15 @@
         </div>
         <div id="power-list" class="stack"></div>
       </section>
+
+      <section class="card span-2" aria-labelledby="storage-io-title">
+        <div class="card-title">
+          <h2 id="storage-io-title">Storage writes</h2>
+          <span id="sd-written" class="metric-big">--</span>
+        </div>
+        <p class="muted">SD writes since boot — should stay low if write-reduction is working</p>
+        <div id="block-io-list" class="table-list"></div>
+      </section>
     </main>
 
     <script src="/app.js" type="module"></script>

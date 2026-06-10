@@ -4,6 +4,7 @@ from pathlib import Path
 
 from rk3562deb_dashboard.collectors import (
     CollectorState,
+    collect_block_io,
     collect_cpu,
     collect_disks,
     collect_host,
@@ -210,3 +211,34 @@ def test_processes_counts_states_and_ranks_by_rss(tmp_path: Path) -> None:
     assert processes["states"] == {"S": 2, "R": 1}
     assert [proc["pid"] for proc in processes["top_memory"]] == [102, 101]
     assert processes["top_memory"][0]["rss_bytes"] == 40960 * 1024
+
+
+def write_block_diskstats(root: Path, sd_written: int, emmc_written: int) -> None:
+    write(
+        root,
+        "/proc/diskstats",
+        f"179 0 mmcblk0 100 0 4096 0 50 0 {sd_written} 0 0 0 0 0\n"
+        f"179 32 mmcblk2 100 0 8192 0 50 0 {emmc_written} 0 0 0 0 0\n",
+    )
+
+
+def test_block_io_reports_totals_and_kind_and_skips_boot_partitions(tmp_path: Path) -> None:
+    state = CollectorState()
+    write(tmp_path, "/sys/block/mmcblk0/device/type", "SD")
+    write(tmp_path, "/sys/block/mmcblk2/device/type", "MMC")
+    (tmp_path / "sys/block/mmcblk2boot0").mkdir(parents=True)
+    (tmp_path / "sys/block/mmcblk2rpmb").mkdir(parents=True)
+    write_block_diskstats(tmp_path, sd_written=16, emmc_written=2048)
+
+    first = collect_block_io(state, 1.0, tmp_path)
+    write_block_diskstats(tmp_path, sd_written=16, emmc_written=2248)
+    second = collect_block_io(state, 1.0, tmp_path)
+
+    assert [device["name"] for device in first] == ["mmcblk0", "mmcblk2"]
+    assert first[0]["kind"] == "SD"
+    assert first[1]["kind"] == "MMC"
+    assert first[0]["written_bytes_total"] == 16 * 512
+    assert first[1]["written_bytes_total"] == 2048 * 512
+    assert all(device["write_bytes_per_sec"] == 0 for device in first)
+    assert second[0]["write_bytes_per_sec"] == 0
+    assert second[1]["write_bytes_per_sec"] == 200 * 512

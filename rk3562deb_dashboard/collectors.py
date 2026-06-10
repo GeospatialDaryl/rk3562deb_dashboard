@@ -26,6 +26,7 @@ class CollectorState:
     cpu: dict[str, list[int]] = field(default_factory=dict)
     disks: dict[str, tuple[int, int]] = field(default_factory=dict)
     net: dict[str, tuple[int, int]] = field(default_factory=dict)
+    blocks: dict[str, tuple[int, int]] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.monotonic)
 
 
@@ -82,6 +83,7 @@ def collect_snapshot(state: CollectorState | None = None, root: Path = ROOT) -> 
         "swap": collect_swap(root),
         "processes": collect_processes(root),
         "disks": collect_disks(state, interval, root),
+        "block_io": collect_block_io(state, interval, root),
         "network": collect_network(state, interval, root),
         "thermal": collect_thermal(root),
         "power": collect_power(root),
@@ -291,6 +293,39 @@ def _disk_usage(mount_point: str, root: Path = ROOT) -> dict[str, Any]:
     free = usage.f_bavail * usage.f_frsize
     used = max(0, total - free)
     return {"total_bytes": total, "used_bytes": used, "usage_percent": _percent(used, total)}
+
+
+def collect_block_io(
+    state: CollectorState, interval: float, root: Path = ROOT
+) -> list[dict[str, Any]]:
+    """Whole-device I/O totals since boot plus current rates.
+
+    The mmc subsystem's device/type distinguishes SD cards from eMMC, so the UI
+    can verify that SD write-reduction measures are actually working.
+    """
+
+    diskstats = _parse_diskstats(root)
+    devices: list[dict[str, Any]] = []
+    for block in _glob("/sys/block/*", root):
+        if not block.name.startswith(("mmcblk", "nvme", "sd")):
+            continue
+        if re.search(r"mmcblk\d+(boot\d+|rpmb)$", block.name):
+            continue
+        rel = Path("/") / block.relative_to(root)
+        reads, writes = diskstats.get(block.name, (0, 0))
+        previous_reads, previous_writes = state.blocks.get(block.name, (reads, writes))
+        state.blocks[block.name] = (reads, writes)
+        devices.append(
+            {
+                "name": block.name,
+                "kind": _read_text(rel / "device/type", root),
+                "read_bytes_total": reads,
+                "written_bytes_total": writes,
+                "read_bytes_per_sec": max(0, round((reads - previous_reads) / interval)),
+                "write_bytes_per_sec": max(0, round((writes - previous_writes) / interval)),
+            }
+        )
+    return devices
 
 
 def _parse_diskstats(root: Path = ROOT) -> dict[str, tuple[int, int]]:

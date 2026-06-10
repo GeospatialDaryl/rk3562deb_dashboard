@@ -11,6 +11,7 @@ The dashboard covers the same operational areas that make `btop` useful while ad
 - Memory, cache, and swap utilization.
 - Process counts and top resident-memory processes.
 - Mounted block-device usage plus read/write rates.
+- Whole-device write totals since boot, separating SD cards from eMMC so SD write-reduction measures can be verified.
 - Network interface state and throughput.
 - Thermal zones exposed by the kernel.
 - Power supplies exposed by sysfs.
@@ -60,7 +61,7 @@ GET /api/snapshot
 The response is a JSON object with these top-level keys:
 
 ```text
-timestamp, host, cpu, memory, swap, processes, disks, network, thermal, power, rockchip
+timestamp, host, cpu, memory, swap, processes, disks, block_io, network, thermal, power, rockchip
 ```
 
 This makes it straightforward to add terminal, kiosk, or Prometheus exporter integrations later without rewriting collectors.
