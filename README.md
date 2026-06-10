@@ -15,7 +15,7 @@ The dashboard covers the same operational areas that make `btop` useful while ad
 - Network interface state and throughput.
 - Thermal zones exposed by the kernel.
 - Power supplies exposed by sysfs.
-- NPU load, clocks, and rknpu driver version on kernels with the Rockchip NPU devfreq node.
+- NPU clocks, governor, devfreq load, and rknpu driver version on kernels with the Rockchip NPU devfreq node. Some vendor kernels report a static load value; the UI flags it instead of showing it as live utilization.
 - Rockchip/RK3562-specific device-tree identity, devfreq clocks, regulator rails, and eMMC/SD/NVMe storage identity.
 
 All collectors are best-effort. If a Debian kernel does not expose a sysfs interface, the dashboard keeps running and marks that section as unavailable.

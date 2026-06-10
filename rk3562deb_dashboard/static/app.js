@@ -157,21 +157,32 @@ function renderBlockIo(blocks) {
   `).join("") || `<p class="muted">No block devices found.</p>`;
 }
 
+// Some vendor kernels never update the NPU devfreq load attribute; only show it
+// as a live percentage once it has been observed to vary.
+const npuLoadValues = new Set();
+
 function renderNpu(npu) {
   const devices = npu?.devices || [];
-  const load = devices[0]?.load_percent;
-  $("npu-load").textContent = load == null ? "n/a" : percent(load);
-  setBar("npu-bar", load == null ? 0 : load);
+  const primary = devices[0];
+  $("npu-freq").textContent = primary ? freq(primary.frequency_hz) : "n/a";
+  if (primary?.load_percent != null) npuLoadValues.add(primary.load_percent);
   const rows = devices.map((device) => `
     <div class="row">
       <strong>${esc(device.name)}</strong>
-      <small>${freq(device.frequency_hz)} / max ${freq(device.max_hz)} · ${esc(device.governor || "governor n/a")}</small>
+      <small>${freq(device.min_hz)}–${freq(device.max_hz)} · ${esc(device.governor || "governor n/a")}</small>
     </div>
   `).join("");
+  const load = primary?.load_percent == null ? "" : `
+    <div class="row">
+      <strong>devfreq load</strong>
+      <small>${npuLoadValues.size > 1
+        ? percent(primary.load_percent)
+        : `reports ${percent(primary.load_percent)} — static on this kernel`}</small>
+    </div>`;
   const driver = npu?.driver_version
     ? `<div class="row"><strong>rknpu driver</strong><small>v${esc(npu.driver_version)}</small></div>`
     : "";
-  $("npu-list").innerHTML = (rows + driver)
+  $("npu-list").innerHTML = (rows + load + driver)
     || `<p class="muted">No NPU devfreq exposed by this kernel.</p>`;
 }
 
