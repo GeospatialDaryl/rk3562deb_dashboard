@@ -99,6 +99,15 @@
         <p class="muted">SD writes since boot — should stay low if write-reduction is working</p>
         <div id="block-io-list" class="table-list"></div>
       </section>
+
+      <section class="card" aria-labelledby="npu-title">
+        <div class="card-title">
+          <h2 id="npu-title">NPU</h2>
+          <span id="npu-load" class="metric-big">--%</span>
+        </div>
+        <div class="bar"><span id="npu-bar"></span></div>
+        <div id="npu-list" class="stack"></div>
+      </section>
     </main>
 
     <script src="/app.js" type="module"></script>

@@ -15,6 +15,7 @@ The dashboard covers the same operational areas that make `btop` useful while ad
 - Network interface state and throughput.
 - Thermal zones exposed by the kernel.
 - Power supplies exposed by sysfs.
+- NPU load, clocks, and rknpu driver version on kernels with the Rockchip NPU devfreq node.
 - Rockchip/RK3562-specific device-tree identity, devfreq clocks, regulator rails, and eMMC/SD/NVMe storage identity.
 
 All collectors are best-effort. If a Debian kernel does not expose a sysfs interface, the dashboard keeps running and marks that section as unavailable.
@@ -61,7 +62,7 @@ GET /api/snapshot
 The response is a JSON object with these top-level keys:
 
 ```text
-timestamp, host, cpu, memory, swap, processes, disks, block_io, network, thermal, power, rockchip
+timestamp, host, cpu, memory, swap, processes, disks, block_io, network, thermal, power, npu, rockchip
 ```
 
 This makes it straightforward to add terminal, kiosk, or Prometheus exporter integrations later without rewriting collectors.

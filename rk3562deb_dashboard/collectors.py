@@ -87,6 +87,7 @@ def collect_snapshot(state: CollectorState | None = None, root: Path = ROOT) -> 
         "network": collect_network(state, interval, root),
         "thermal": collect_thermal(root),
         "power": collect_power(root),
+        "npu": collect_npu(root),
         "rockchip": collect_rockchip(root),
     }
     state.timestamp = now
@@ -400,6 +401,41 @@ def collect_power(root: Path = ROOT) -> dict[str, Any]:
             }
         )
     return {"supplies": supplies}
+
+
+def collect_npu(root: Path = ROOT) -> dict[str, Any]:
+    """Rockchip NPU state: rknpu driver version plus devfreq load and clocks.
+
+    The rknpu devfreq node exposes a `load` attribute formatted like
+    "42@1000000000Hz" (busy percent at the current frequency).
+    """
+
+    devices: list[dict[str, Any]] = []
+    for devfreq in _glob("/sys/class/devfreq/*", root):
+        if "npu" not in devfreq.name.lower():
+            continue
+        rel = Path("/") / devfreq.relative_to(root)
+        devices.append(
+            {
+                "name": devfreq.name,
+                "load_percent": _parse_devfreq_load(_read_text(rel / "load", root)),
+                "frequency_hz": _read_int(rel / "cur_freq", root),
+                "min_hz": _read_int(rel / "min_freq", root),
+                "max_hz": _read_int(rel / "max_freq", root),
+                "governor": _read_text(rel / "governor", root),
+            }
+        )
+    return {
+        "driver_version": _read_text(Path("/sys/module/rknpu/version"), root),
+        "devices": devices,
+    }
+
+
+def _parse_devfreq_load(text: str | None) -> int | None:
+    if text is None:
+        return None
+    match = re.match(r"^(\d+)", text)
+    return int(match.group(1)) if match else None
 
 
 def collect_rockchip(root: Path = ROOT) -> dict[str, Any]:

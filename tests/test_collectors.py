@@ -10,6 +10,7 @@ from rk3562deb_dashboard.collectors import (
     collect_host,
     collect_memory,
     collect_network,
+    collect_npu,
     collect_power,
     collect_processes,
     collect_rockchip,
@@ -242,3 +243,26 @@ def test_block_io_reports_totals_and_kind_and_skips_boot_partitions(tmp_path: Pa
     assert all(device["write_bytes_per_sec"] == 0 for device in first)
     assert second[0]["write_bytes_per_sec"] == 0
     assert second[1]["write_bytes_per_sec"] == 200 * 512
+
+
+def test_npu_reads_devfreq_load_and_driver_version(tmp_path: Path) -> None:
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/load", "42@1000000000Hz")
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/cur_freq", "1000000000")
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/max_freq", "1000000000")
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/governor", "rknpu_ondemand")
+    write(tmp_path, "/sys/class/devfreq/ff320000.gpu/load", "10@400000000Hz")
+    write(tmp_path, "/sys/module/rknpu/version", "0.9.8")
+
+    npu = collect_npu(tmp_path)
+
+    assert npu["driver_version"] == "0.9.8"
+    assert [device["name"] for device in npu["devices"]] == ["ff300000.npu"]
+    assert npu["devices"][0]["load_percent"] == 42
+    assert npu["devices"][0]["frequency_hz"] == 1000000000
+    assert npu["devices"][0]["governor"] == "rknpu_ondemand"
+
+
+def test_npu_handles_missing_interfaces(tmp_path: Path) -> None:
+    npu = collect_npu(tmp_path)
+
+    assert npu == {"driver_version": None, "devices": []}

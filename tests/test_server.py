@@ -22,6 +22,7 @@ SNAPSHOT_KEYS = (
     "network",
     "thermal",
     "power",
+    "npu",
     "rockchip",
 )
 

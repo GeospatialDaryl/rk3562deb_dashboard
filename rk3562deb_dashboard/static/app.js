@@ -157,6 +157,24 @@ function renderBlockIo(blocks) {
   `).join("") || `<p class="muted">No block devices found.</p>`;
 }
 
+function renderNpu(npu) {
+  const devices = npu?.devices || [];
+  const load = devices[0]?.load_percent;
+  $("npu-load").textContent = load == null ? "n/a" : percent(load);
+  setBar("npu-bar", load == null ? 0 : load);
+  const rows = devices.map((device) => `
+    <div class="row">
+      <strong>${esc(device.name)}</strong>
+      <small>${freq(device.frequency_hz)} / max ${freq(device.max_hz)} · ${esc(device.governor || "governor n/a")}</small>
+    </div>
+  `).join("");
+  const driver = npu?.driver_version
+    ? `<div class="row"><strong>rknpu driver</strong><small>v${esc(npu.driver_version)}</small></div>`
+    : "";
+  $("npu-list").innerHTML = (rows + driver)
+    || `<p class="muted">No NPU devfreq exposed by this kernel.</p>`;
+}
+
 function renderProcesses(processes) {
   $("process-count").textContent = processes.count || 0;
   $("process-list").innerHTML = (processes.top_memory || []).map((proc) => `
@@ -178,6 +196,7 @@ function render(snapshot) {
   renderRockchip(snapshot.rockchip);
   renderProcesses(snapshot.processes);
   renderPower(snapshot.power);
+  renderNpu(snapshot.npu);
 }
 
 async function refresh() {
