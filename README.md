@@ -21,10 +21,12 @@ All collectors are best-effort. If a Debian kernel does not expose a sysfs inter
 ## Run locally
 
 ```bash
-python -m rk3562deb_dashboard.server --host 127.0.0.1 --port 8765
+python -m rk3562deb_dashboard.server --port 8765
 ```
 
-Then open <http://127.0.0.1:8765>.
+The server binds to `0.0.0.0` by default so the dashboard is reachable from the
+LAN; open `http://<device-ip>:8765`. Pass `--host 127.0.0.1` to restrict it to
+the device itself.
 
 You can also install the console script in a virtual environment:
 
@@ -32,7 +34,19 @@ You can also install the console script in a virtual environment:
 python -m venv .venv
 . .venv/bin/activate
 pip install -e .
-rk-dashboard --host 127.0.0.1 --port 8765
+rk-dashboard --port 8765
+```
+
+## Run at boot (systemd)
+
+A unit file is provided in `deploy/`. It assumes the package is installed in a
+virtual environment at `/home/frodo/venvs/dashboard`; edit `User=` and
+`ExecStart=` to match your install before copying:
+
+```bash
+sudo cp deploy/rk-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rk-dashboard
 ```
 
 ## API
@@ -67,7 +81,7 @@ mypy rk3562deb_dashboard tests
 
 ## Design notes
 
-- **Local-first:** binds to `127.0.0.1` by default and avoids external assets.
+- **Local-first:** serves everything itself and avoids external assets; binds to `0.0.0.0` for LAN access, restrictable with `--host`.
 - **Dependency-light:** the server uses only Python's standard library, which is valuable on constrained RK3562 Debian systems.
 - **Safe failure mode:** collectors handle missing files and permissions without breaking the page.
 - **Testable collectors:** every collector accepts an alternate filesystem root so procfs/sysfs fixtures can be tested without privileged host access.

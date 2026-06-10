@@ -1,0 +1,22 @@
+[Unit]
+Description=RK3562 Debian dashboard
+After=network.target
+# /home/frodo is a bind mount from the eMMC (/mnt/internal, nofail); without
+# this ordering the service can start before the venv exists.
+RequiresMountsFor=/home/frodo
+
+[Service]
+Type=simple
+User=frodo
+ExecStart=/home/frodo/venvs/dashboard/bin/rk-dashboard --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+
+# The dashboard only reads procfs/sysfs and serves HTTP.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

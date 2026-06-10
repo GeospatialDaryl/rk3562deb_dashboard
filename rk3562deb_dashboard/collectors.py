@@ -264,8 +264,10 @@ def collect_disks(
         usage = _disk_usage(mount_point, root)
         device_name = Path(source).name
         reads, writes = diskstats.get(device_name, (0, 0))
-        previous_reads, previous_writes = state.disks.get(device_name, (reads, writes))
-        state.disks[device_name] = (reads, writes)
+        # Key deltas by mount point, not device: bind mounts share a device, and a
+        # device-keyed store would let the first mount consume the whole delta.
+        previous_reads, previous_writes = state.disks.get(mount_point, (reads, writes))
+        state.disks[mount_point] = (reads, writes)
         disks.append(
             {
                 "mount": mount_point,

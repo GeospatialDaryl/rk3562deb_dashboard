@@ -1,5 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ESCAPES[char]);
+}
 
 function bytes(value = 0) {
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -81,8 +86,8 @@ function renderThermal(thermal) {
   $("thermal-max").textContent = max === null ? "n/a" : `${formatter.format(max)}°C`;
   $("thermal-list").innerHTML = (thermal || []).map((zone) => `
     <div class="row">
-      <strong>${zone.name}</strong>
-      <small>${zone.temperature_c === null ? "n/a" : `${formatter.format(zone.temperature_c)}°C`} · ${zone.path}</small>
+      <strong>${esc(zone.name)}</strong>
+      <small>${zone.temperature_c === null ? "n/a" : `${formatter.format(zone.temperature_c)}°C`} · ${esc(zone.path)}</small>
     </div>
   `).join("") || `<p class="muted">No thermal zones exposed by this kernel.</p>`;
 }
@@ -90,7 +95,7 @@ function renderThermal(thermal) {
 function renderDisks(disks) {
   $("disk-list").innerHTML = (disks || []).map((disk) => `
     <div class="row table-row">
-      <div><strong>${disk.mount}</strong><small>${disk.source} · ${disk.filesystem}</small></div>
+      <div><strong>${esc(disk.mount)}</strong><small>${esc(disk.source)} · ${esc(disk.filesystem)}</small></div>
       <div>${percent(disk.usage_percent)} · ${bytes(disk.used_bytes)} / ${bytes(disk.total_bytes)}</div>
       <small>R ${bytes(disk.read_bytes_per_sec)}/s · W ${bytes(disk.write_bytes_per_sec)}/s</small>
     </div>
@@ -100,7 +105,7 @@ function renderDisks(disks) {
 function renderNetwork(network) {
   $("network-list").innerHTML = (network || []).map((iface) => `
     <div class="row table-row">
-      <div><strong>${iface.name}</strong><small>${iface.operstate || "unknown"}</small></div>
+      <div><strong>${esc(iface.name)}</strong><small>${esc(iface.operstate || "unknown")}</small></div>
       <div>RX ${bytes(iface.rx_bytes_per_sec)}/s</div>
       <div>TX ${bytes(iface.tx_bytes_per_sec)}/s</div>
     </div>
@@ -109,15 +114,17 @@ function renderNetwork(network) {
 
 function renderRockchip(rockchip) {
   const devfreq = (rockchip.devfreq || []).map((device) => `
-    <div class="tile"><strong>${device.name}</strong><small>${freq(device.frequency_hz)} · ${device.governor || "governor n/a"}</small></div>
+    <div class="tile"><strong>${esc(device.name)}</strong><small>${freq(device.frequency_hz)} · ${esc(device.governor || "governor n/a")}</small></div>
   `).join("");
   const regulators = (rockchip.regulators || []).map((regulator) => `
-    <div class="tile"><strong>${regulator.name}</strong><small>${regulator.state || "n/a"} · ${regulator.microvolts ? `${formatter.format(regulator.microvolts / 1000)} mV` : "voltage n/a"}</small></div>
+    <div class="tile"><strong>${esc(regulator.name)}</strong><small>${esc(regulator.state || "n/a")} · ${regulator.microvolts ? `${formatter.format(regulator.microvolts / 1000)} mV` : "voltage n/a"}</small></div>
   `).join("");
   const storage = (rockchip.storage || []).map((disk) => `
-    <div class="tile"><strong>${disk.name}</strong><small>${bytes(disk.size_bytes)} · ${disk.model || "model n/a"}</small></div>
+    <div class="tile"><strong>${esc(disk.name)}</strong><small>${bytes(disk.size_bytes)} · ${esc(disk.model || "model n/a")}</small></div>
   `).join("");
-  $("rockchip-list").innerHTML = devfreq + regulators + storage || `<p class="muted">Rockchip-specific sysfs data is not exposed on this host.</p>`;
+  const tiles = [devfreq, regulators, storage].join("");
+  $("rockchip-list").innerHTML = tiles
+    || `<p class="muted">Rockchip-specific sysfs data is not exposed on this host.</p>`;
 }
 
 function renderPower(power) {
@@ -126,14 +133,14 @@ function renderPower(power) {
   $("power-capacity").textContent = battery ? percent(battery.capacity_percent) : "n/a";
   $("power-list").innerHTML = supplies.map((supply) => `
     <div class="row">
-      <strong>${supply.name}</strong>
-      <small>${[
+      <strong>${esc(supply.name)}</strong>
+      <small>${esc([
         supply.type,
         supply.status,
         supply.capacity_percent !== null && supply.capacity_percent !== undefined ? percent(supply.capacity_percent) : null,
         supply.voltage_uv != null ? `${formatter.format(supply.voltage_uv / 1_000_000)} V` : null,
         supply.current_ua != null ? `${formatter.format(Math.abs(supply.current_ua) / 1_000)} mA` : null,
-      ].filter(Boolean).join(" · ")}</small>
+      ].filter(Boolean).join(" · "))}</small>
     </div>
   `).join("") || `<p class="muted">No power supplies exposed by sysfs.</p>`;
 }
@@ -142,8 +149,8 @@ function renderProcesses(processes) {
   $("process-count").textContent = processes.count || 0;
   $("process-list").innerHTML = (processes.top_memory || []).map((proc) => `
     <div class="row">
-      <strong>${proc.name} <small>#${proc.pid}</small></strong>
-      <small>${proc.state} · RSS ${bytes(proc.rss_bytes)}</small>
+      <strong>${esc(proc.name)} <small>#${proc.pid}</small></strong>
+      <small>${esc(proc.state)} · RSS ${bytes(proc.rss_bytes)}</small>
     </div>
   `).join("");
 }
