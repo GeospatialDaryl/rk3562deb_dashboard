@@ -20,6 +20,10 @@ The dashboard covers the same operational areas that make `btop` useful while ad
 
 All collectors are best-effort. If a Debian kernel does not expose a sysfs interface, the dashboard keeps running and marks that section as unavailable.
 
+## Requirements
+
+Python ≥ 3.11. No third-party runtime dependencies.
+
 ## Run locally
 
 ```bash
@@ -53,11 +57,10 @@ sudo systemctl enable --now rk-dashboard
 
 ## API
 
-The UI consumes two endpoints:
-
 ```text
-GET /api/snapshot
-GET /api/history
+GET /api/snapshot   — current metrics snapshot
+GET /api/history    — 10-minute ring buffer for sparklines
+GET /healthz        — {"ok": true}; used by service-readiness checks
 ```
 
 The snapshot response is a JSON object with these top-level keys:
@@ -67,24 +70,28 @@ timestamp, host, cpu, memory, swap, processes, disks, block_io, network, thermal
 ```
 
 A background sampler collects every 2 seconds and keeps the last 10 minutes in
-memory (never on disk). `/api/history` returns that ring buffer as compact
-points (`t, cpu, mem, temp, sd_write, emmc_write`), which the UI renders as
-sparklines on the CPU, thermal, and storage cards.
+memory (never on disk). `/api/history` returns `{"interval_seconds": 2, "points": [...]}` where each point is `{t, cpu, mem, temp, sd_write, emmc_write}`, which the UI renders as sparklines on the CPU, thermal, and storage cards.
 
 This makes it straightforward to add terminal, kiosk, or Prometheus exporter integrations later without rewriting collectors.
 
 ## Development
 
 ```bash
-python -m pytest
+pip install -e . pytest ruff mypy
 python -m compileall rk3562deb_dashboard tests
-```
-
-Optional static-analysis tools are configured in `pyproject.toml` when available:
-
-```bash
 ruff check .
 mypy rk3562deb_dashboard tests
+python -m pytest -q
+```
+
+CI runs the same steps on every push (`.github/workflows/ci.yml`).
+
+The `--root` flag lets you point the server at a directory of procfs/sysfs
+fixtures instead of `/`, which is how the test suite exercises collectors
+without privileged host access:
+
+```bash
+rk-dashboard --root tests/fixtures/
 ```
 
 ## Design notes
