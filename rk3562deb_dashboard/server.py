@@ -3,25 +3,22 @@
 from __future__ import annotations
 
 import json
-import threading
 from argparse import ArgumentParser
-from collections import deque
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .collectors import CollectorState, collect_snapshot
+from .sampler import SAMPLE_INTERVAL_SECONDS, DashboardSampler
+from .serialization import history_point_to_dict, snapshot_to_dict
 
 STATIC_DIR = Path(__file__).with_name("static")
-SAMPLE_INTERVAL_SECONDS = 2.0
-HISTORY_SIZE = 300  # 10 minutes at the default interval
 
 
+# Keep the old dict-based helper for backward compatibility with tests
 def history_point(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Reduce a snapshot to the compact series the sparklines consume."""
-
+    """Reduce a snapshot dict to the compact series the sparklines consume."""
     temps = [
         zone["temperature_c"]
         for zone in snapshot.get("thermal", [])
@@ -44,12 +41,10 @@ def history_point(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 class DashboardServer(ThreadingHTTPServer):
-    """Threaded HTTP server with a background sampler owning collector state.
+    """Threaded HTTP server backed by a DashboardSampler.
 
-    A single sampler thread collects every SAMPLE_INTERVAL_SECONDS so rates are
-    computed over a steady interval regardless of how many clients poll, and a
-    ring buffer of compact points feeds the history API. Requests serve the
-    cached snapshot.
+    The sampler owns the collector state and background thread.  This class
+    translates typed snapshots into JSON dicts for the existing browser UI.
     """
 
     def __init__(
@@ -59,36 +54,20 @@ class DashboardServer(ThreadingHTTPServer):
         sample_interval: float = SAMPLE_INTERVAL_SECONDS,
     ) -> None:
         super().__init__(server_address, DashboardRequestHandler)
-        self.root = root
-        self.sample_interval = sample_interval
-        self.collector_state = CollectorState()
-        self.collector_lock = threading.Lock()
-        self.history: deque[dict[str, Any]] = deque(maxlen=HISTORY_SIZE)
-        self._latest = collect_snapshot(self.collector_state, root)
-        self.history.append(history_point(self._latest))
-        self._stop_sampler = threading.Event()
-        self._sampler = threading.Thread(
-            target=self._sample_loop, name="dashboard-sampler", daemon=True
-        )
-        self._sampler.start()
+        self.sampler = DashboardSampler(root=root, interval=sample_interval)
+        self.sampler.start()
 
     def snapshot(self) -> dict[str, Any]:
-        with self.collector_lock:
-            return self._latest
+        return snapshot_to_dict(self.sampler.sample())
 
     def history_points(self) -> dict[str, Any]:
-        with self.collector_lock:
-            return {"interval_seconds": self.sample_interval, "points": list(self.history)}
-
-    def _sample_loop(self) -> None:
-        while not self._stop_sampler.wait(self.sample_interval):
-            snapshot = collect_snapshot(self.collector_state, self.root)
-            with self.collector_lock:
-                self._latest = snapshot
-                self.history.append(history_point(snapshot))
+        return {
+            "interval_seconds": self.sampler.interval,
+            "points": [history_point_to_dict(hp) for hp in self.sampler.history()],
+        }
 
     def server_close(self) -> None:
-        self._stop_sampler.set()
+        self.sampler.stop()
         super().server_close()
 
 
@@ -129,7 +108,6 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
-        # Keep default useful access logs, but prefix them for journalctl readability.
         super().log_message("[rk-dashboard] " + format, *args)
 
 

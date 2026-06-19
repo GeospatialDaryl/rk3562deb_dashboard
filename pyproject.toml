@@ -24,8 +24,8 @@ classifiers = [
 [project.scripts]
 rk-dashboard = "rk3562deb_dashboard.server:main"
 
-[tool.setuptools]
-packages = ["rk3562deb_dashboard"]
+[tool.setuptools.packages.find]
+include = ["rk3562deb_dashboard*"]
 
 [tool.setuptools.package-data]
 rk3562deb_dashboard = ["static/*", "py.typed"]

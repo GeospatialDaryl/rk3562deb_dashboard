@@ -2,20 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rk3562deb_dashboard.collectors import (
-    CollectorState,
-    collect_block_io,
-    collect_cpu,
-    collect_disks,
-    collect_host,
-    collect_memory,
-    collect_network,
-    collect_npu,
-    collect_power,
-    collect_processes,
-    collect_rockchip,
-    collect_thermal,
-)
+from rk3562deb_dashboard.collectors import CollectorState, collect_snapshot
+from rk3562deb_dashboard.collectors.cpu import CpuState, collect_cpu
+from rk3562deb_dashboard.collectors.host import collect_host
+from rk3562deb_dashboard.collectors.memory import collect_memory
+from rk3562deb_dashboard.collectors.network import NetworkState, collect_network
+from rk3562deb_dashboard.collectors.npu import collect_npu
+from rk3562deb_dashboard.collectors.power import collect_power
+from rk3562deb_dashboard.collectors.process import collect_processes
+from rk3562deb_dashboard.collectors.rockchip import collect_rockchip
+from rk3562deb_dashboard.collectors.storage import StorageState, collect_block_io, collect_disks
+from rk3562deb_dashboard.collectors.thermal import collect_thermal
+from rk3562deb_dashboard.models import MetricState
 
 
 def write(root: Path, relative: str, value: str) -> None:
@@ -40,17 +38,20 @@ SwapFree:         256 kB
 """.strip(),
     )
 
-    memory = collect_memory(tmp_path)
+    mv = collect_memory(tmp_path)
+    assert mv.is_available
+    memory = mv.value
+    assert memory is not None
 
-    assert memory["total_bytes"] == 1024 * 1024
-    assert memory["available_bytes"] == 768 * 1024
-    assert memory["used_bytes"] == 256 * 1024
-    assert memory["usage_percent"] == 25.0
-    assert memory["cached_bytes"] == 40 * 1024
+    assert memory.total_bytes == 1024 * 1024
+    assert memory.available_bytes == 768 * 1024
+    assert memory.used_bytes == 256 * 1024
+    assert memory.usage_percent == 25.0
+    assert memory.cached_bytes == 40 * 1024
 
 
 def test_cpu_usage_is_delta_based(tmp_path: Path) -> None:
-    state = CollectorState()
+    state = CpuState()
     write(
         tmp_path,
         "/proc/stat",
@@ -65,9 +66,11 @@ def test_cpu_usage_is_delta_based(tmp_path: Path) -> None:
 
     second = collect_cpu(state, tmp_path)
 
-    assert first["total"]["usage_percent"] == 0.0
-    assert second["total"]["usage_percent"] == 50.0
-    assert second["cores"][0]["usage_percent"] == 50.0
+    assert first.value is not None
+    assert first.value.usage_percent == 0.0
+    assert second.value is not None
+    assert second.value.usage_percent == 50.0
+    assert second.value.cores[0].usage_percent == 50.0
 
 
 def test_rockchip_collects_device_tree_devfreq_regulators_and_storage(tmp_path: Path) -> None:
@@ -81,14 +84,18 @@ def test_rockchip_collects_device_tree_devfreq_regulators_and_storage(tmp_path: 
     write(tmp_path, "/sys/block/mmcblk0/size", "61071360")
     write(tmp_path, "/sys/block/mmcblk0/removable", "0")
 
-    rockchip = collect_rockchip(tmp_path)
+    mv = collect_rockchip(tmp_path)
+    assert mv.is_available
+    rockchip = mv.value
+    assert rockchip is not None
 
-    assert rockchip["device_tree"]["model"] == "RK3562 Test Board"
-    assert "rockchip,rk3562" in rockchip["device_tree"]["compatible"]
-    assert rockchip["devfreq"][0]["frequency_hz"] == 400000000
-    assert rockchip["regulators"][0]["microvolts"] == 900000
-    assert rockchip["storage"][0]["name"] == "mmcblk0"
-    assert rockchip["storage"][0]["size_bytes"] == 61071360 * 512
+    assert rockchip.device_tree.model == "RK3562 Test Board"
+    assert rockchip.device_tree.compatible is not None
+    assert "rockchip,rk3562" in rockchip.device_tree.compatible
+    assert rockchip.devfreq[0].frequency_hz == 400000000
+    assert rockchip.regulators[0].microvolts == 900000
+    assert rockchip.storage[0].name == "mmcblk0"
+    assert rockchip.storage[0].size_bytes == 61071360 * 512
 
 
 def test_host_parses_uptime_load_and_model(tmp_path: Path) -> None:
@@ -98,9 +105,9 @@ def test_host_parses_uptime_load_and_model(tmp_path: Path) -> None:
 
     host = collect_host(tmp_path)
 
-    assert host["uptime_seconds"] == 12345.7
-    assert host["load"] == [0.5, 0.4, 0.3]
-    assert host["model"] == "RK3562 Test Board"
+    assert host.uptime_seconds == 12345.7
+    assert host.load == (0.5, 0.4, 0.3)
+    assert host.model == "RK3562 Test Board"
 
 
 MOUNTINFO = (
@@ -120,7 +127,7 @@ def write_diskstats(root: Path, sectors_read: int, sectors_written: int) -> None
 def test_disks_rates_are_per_mount_for_shared_devices(tmp_path: Path) -> None:
     """Bind mounts share a device; each mount must still report the I/O delta."""
 
-    state = CollectorState()
+    state = StorageState()
     write(tmp_path, "/proc/self/mountinfo", MOUNTINFO)
     (tmp_path / "mnt/internal").mkdir(parents=True)
     (tmp_path / "home/frodo").mkdir(parents=True)
@@ -130,10 +137,12 @@ def test_disks_rates_are_per_mount_for_shared_devices(tmp_path: Path) -> None:
     write_diskstats(tmp_path, sectors_read=2248, sectors_written=1124)
     second = collect_disks(state, 1.0, tmp_path)
 
-    assert [disk["mount"] for disk in first] == ["/mnt/internal", "/home/frodo"]
-    assert all(disk["read_bytes_per_sec"] == 0 for disk in first)
-    assert [disk["read_bytes_per_sec"] for disk in second] == [200 * 512, 200 * 512]
-    assert [disk["write_bytes_per_sec"] for disk in second] == [100 * 512, 100 * 512]
+    assert first.is_available and first.value is not None
+    assert second.is_available and second.value is not None
+    assert [d.mount for d in first.value] == ["/mnt/internal", "/home/frodo"]
+    assert all(d.read_bytes_per_sec == 0 for d in first.value)
+    assert [d.read_bytes_per_sec for d in second.value] == [200 * 512, 200 * 512]
+    assert [d.write_bytes_per_sec for d in second.value] == [100 * 512, 100 * 512]
 
 
 def write_net_dev(root: Path, rx_bytes: int, tx_bytes: int) -> None:
@@ -148,7 +157,7 @@ def write_net_dev(root: Path, rx_bytes: int, tx_bytes: int) -> None:
 
 
 def test_network_rates_are_delta_based(tmp_path: Path) -> None:
-    state = CollectorState()
+    state = NetworkState()
     write_net_dev(tmp_path, rx_bytes=1000, tx_bytes=2000)
     write(tmp_path, "/sys/class/net/eth0/operstate", "up")
 
@@ -156,11 +165,13 @@ def test_network_rates_are_delta_based(tmp_path: Path) -> None:
     write_net_dev(tmp_path, rx_bytes=3000, tx_bytes=2500)
     second = collect_network(state, 1.0, tmp_path)
 
-    assert first[0]["name"] == "eth0"
-    assert first[0]["operstate"] == "up"
-    assert first[0]["rx_bytes_per_sec"] == 0
-    assert second[0]["rx_bytes_per_sec"] == 2000
-    assert second[0]["tx_bytes_per_sec"] == 500
+    assert first.is_available and first.value is not None
+    assert second.is_available and second.value is not None
+    assert first.value[0].name == "eth0"
+    assert first.value[0].operstate == "up"
+    assert first.value[0].rx_bytes_per_sec == 0
+    assert second.value[0].rx_bytes_per_sec == 2000
+    assert second.value[0].tx_bytes_per_sec == 500
 
 
 def test_thermal_reads_zones_in_celsius(tmp_path: Path) -> None:
@@ -168,12 +179,14 @@ def test_thermal_reads_zones_in_celsius(tmp_path: Path) -> None:
     write(tmp_path, "/sys/class/thermal/thermal_zone0/temp", "45500")
     write(tmp_path, "/sys/class/thermal/thermal_zone1/type", "gpu-thermal")
 
-    zones = collect_thermal(tmp_path)
+    mv = collect_thermal(tmp_path)
+    assert mv.is_available and mv.value is not None
+    zones = mv.value
 
-    assert zones[0]["name"] == "soc-thermal"
-    assert zones[0]["temperature_c"] == 45.5
-    assert zones[1]["name"] == "gpu-thermal"
-    assert zones[1]["temperature_c"] is None
+    assert zones[0].name == "soc-thermal"
+    assert zones[0].temperature_c == 45.5
+    assert zones[1].name == "gpu-thermal"
+    assert zones[1].temperature_c is None
 
 
 def test_power_reads_battery_supply(tmp_path: Path) -> None:
@@ -183,14 +196,15 @@ def test_power_reads_battery_supply(tmp_path: Path) -> None:
     write(tmp_path, "/sys/class/power_supply/battery/current_now", "-250000")
     write(tmp_path, "/sys/class/power_supply/battery/capacity", "76")
 
-    power = collect_power(tmp_path)
+    mv = collect_power(tmp_path)
+    assert mv.is_available and mv.value is not None
+    supply = mv.value.supplies[0]
 
-    supply = power["supplies"][0]
-    assert supply["name"] == "battery"
-    assert supply["status"] == "Discharging"
-    assert supply["voltage_uv"] == 3850000
-    assert supply["current_ua"] == -250000
-    assert supply["capacity_percent"] == 76
+    assert supply.name == "battery"
+    assert supply.status == "Discharging"
+    assert supply.voltage_uv == 3850000
+    assert supply.current_ua == -250000
+    assert supply.capacity_percent == 76
 
 
 def test_processes_counts_states_and_ranks_by_rss(tmp_path: Path) -> None:
@@ -206,12 +220,14 @@ def test_processes_counts_states_and_ranks_by_rss(tmp_path: Path) -> None:
     )
     write(tmp_path, "/proc/103/status", "Name:\tkthread\nState:\tS (sleeping)\n")
 
-    processes = collect_processes(tmp_path)
+    mv = collect_processes(tmp_path)
+    assert mv.is_available and mv.value is not None
+    processes = mv.value
 
-    assert processes["count"] == 3
-    assert processes["states"] == {"S": 2, "R": 1}
-    assert [proc["pid"] for proc in processes["top_memory"]] == [102, 101]
-    assert processes["top_memory"][0]["rss_bytes"] == 40960 * 1024
+    assert processes.count == 3
+    assert processes.states == {"S": 2, "R": 1}
+    assert [p.pid for p in processes.top_memory] == [102, 101]
+    assert processes.top_memory[0].rss_bytes == 40960 * 1024
 
 
 def write_block_diskstats(root: Path, sd_written: int, emmc_written: int) -> None:
@@ -224,7 +240,7 @@ def write_block_diskstats(root: Path, sd_written: int, emmc_written: int) -> Non
 
 
 def test_block_io_reports_totals_and_kind_and_skips_boot_partitions(tmp_path: Path) -> None:
-    state = CollectorState()
+    state = StorageState()
     write(tmp_path, "/sys/block/mmcblk0/device/type", "SD")
     write(tmp_path, "/sys/block/mmcblk2/device/type", "MMC")
     (tmp_path / "sys/block/mmcblk2boot0").mkdir(parents=True)
@@ -235,14 +251,16 @@ def test_block_io_reports_totals_and_kind_and_skips_boot_partitions(tmp_path: Pa
     write_block_diskstats(tmp_path, sd_written=16, emmc_written=2248)
     second = collect_block_io(state, 1.0, tmp_path)
 
-    assert [device["name"] for device in first] == ["mmcblk0", "mmcblk2"]
-    assert first[0]["kind"] == "SD"
-    assert first[1]["kind"] == "MMC"
-    assert first[0]["written_bytes_total"] == 16 * 512
-    assert first[1]["written_bytes_total"] == 2048 * 512
-    assert all(device["write_bytes_per_sec"] == 0 for device in first)
-    assert second[0]["write_bytes_per_sec"] == 0
-    assert second[1]["write_bytes_per_sec"] == 200 * 512
+    assert first.is_available and first.value is not None
+    assert second.is_available and second.value is not None
+    assert [d.name for d in first.value] == ["mmcblk0", "mmcblk2"]
+    assert first.value[0].kind == "SD"
+    assert first.value[1].kind == "MMC"
+    assert first.value[0].written_bytes_total == 16 * 512
+    assert first.value[1].written_bytes_total == 2048 * 512
+    assert all(d.write_bytes_per_sec == 0 for d in first.value)
+    assert second.value[0].write_bytes_per_sec == 0
+    assert second.value[1].write_bytes_per_sec == 200 * 512
 
 
 def test_npu_reads_devfreq_load_and_driver_version(tmp_path: Path) -> None:
@@ -253,16 +271,32 @@ def test_npu_reads_devfreq_load_and_driver_version(tmp_path: Path) -> None:
     write(tmp_path, "/sys/class/devfreq/ff320000.gpu/load", "10@400000000Hz")
     write(tmp_path, "/sys/module/rknpu/version", "0.9.8")
 
-    npu = collect_npu(tmp_path)
+    mv = collect_npu(tmp_path)
+    assert mv.is_available and mv.value is not None
+    npu = mv.value
 
-    assert npu["driver_version"] == "0.9.8"
-    assert [device["name"] for device in npu["devices"]] == ["ff300000.npu"]
-    assert npu["devices"][0]["load_percent"] == 42
-    assert npu["devices"][0]["frequency_hz"] == 1000000000
-    assert npu["devices"][0]["governor"] == "rknpu_ondemand"
+    assert npu.driver_version == "0.9.8"
+    assert [d.name for d in npu.devices] == ["ff300000.npu"]
+    assert npu.devices[0].load_percent == 42
+    assert npu.devices[0].frequency_hz == 1000000000
+    assert npu.devices[0].governor == "rknpu_ondemand"
 
 
 def test_npu_handles_missing_interfaces(tmp_path: Path) -> None:
-    npu = collect_npu(tmp_path)
+    mv = collect_npu(tmp_path)
+    assert mv.is_available and mv.value is not None
+    assert mv.value.driver_version is None
+    assert mv.value.devices == ()
 
-    assert npu == {"driver_version": None, "devices": []}
+
+def test_collect_snapshot_returns_typed_snapshot(tmp_path: Path) -> None:
+    write(tmp_path, "/proc/stat", "cpu  100 0 100 800 0 0 0 0 0 0\n")
+    write(tmp_path, "/proc/meminfo", "MemTotal: 1024 kB\nMemAvailable: 512 kB\n")
+    state = CollectorState()
+    snapshot = collect_snapshot(state, tmp_path)
+
+    assert snapshot.host.hostname
+    assert snapshot.cpu.state == MetricState.AVAILABLE
+    assert snapshot.memory.state == MetricState.AVAILABLE
+    assert snapshot.captured_at > 0
+    assert snapshot.monotonic_seconds > 0
