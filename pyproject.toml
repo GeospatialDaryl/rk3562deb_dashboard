@@ -21,8 +21,12 @@ classifiers = [
   "Topic :: System :: Monitoring",
 ]
 
+[project.optional-dependencies]
+tui = ["pyTuiMonster @ file:///${PROJECT_ROOT}/../TUI_Monster"]
+
 [project.scripts]
 rk-dashboard = "rk3562deb_dashboard.server:main"
+rk-tui = "rk3562deb_dashboard.tui.main:main"
 
 [tool.setuptools.packages.find]
 include = ["rk3562deb_dashboard*"]
@@ -42,3 +46,13 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "pyTuiMonster.*"
+ignore_missing_imports = true
+follow_untyped_imports = true
+
+[[tool.mypy.overrides]]
+module = "rk3562deb_dashboard.tui.app"
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
