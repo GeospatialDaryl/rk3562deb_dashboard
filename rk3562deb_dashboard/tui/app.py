@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import curses
 import time
+from datetime import UTC, datetime
 
 from pyTuiMonster import TuiConfig, TuiMonsterApp, key_binding
 
-from ..models import DashboardSnapshot
+from ..models import DashboardSnapshot, HistoryPoint, MetricState
 from ..sampler import DashboardSampler
 from .formatting import (
     bar_gauge,
@@ -20,6 +21,7 @@ from .formatting import (
 )
 from .layout import LayoutMode, compute_layout
 from .state import SCREEN_NAMES, ScreenId, TuiState
+from .widgets.sparkline import render_sparkline
 
 HELP_TEXT = [
     "RK3562 Dashboard TUI — Keyboard Help",
@@ -57,6 +59,7 @@ class RKDashboardTui(TuiMonsterApp):
         self._sampler = sampler
         self._state = TuiState()
         self._snapshot: DashboardSnapshot | None = None
+        self._history: list[HistoryPoint] = []
         self._collection_interval = interval
         self._last_collection = 0.0
         self._once = once
@@ -80,6 +83,7 @@ class RKDashboardTui(TuiMonsterApp):
         now = time.monotonic()
         if now - self._last_collection >= 0.25:
             self._snapshot = self._sampler.sample_now()
+            self._history = self._sampler.history()
             self._last_collection = now
 
     @key_binding(ord("d"))
@@ -105,7 +109,10 @@ class RKDashboardTui(TuiMonsterApp):
         else:
             self._state.active_screen = ScreenId.OVERVIEW
 
-    @key_binding(ord("1"), ord("2"), ord("3"), ord("4"), ord("5"), ord("6"), ord("7"))
+    @key_binding(
+        ord("1"), ord("2"), ord("3"), ord("4"),
+        ord("5"), ord("6"), ord("7"),
+    )
     def _switch_screen(self, key: int) -> None:
         self._state.go_to_screen(key - ord("0"))
 
@@ -114,6 +121,7 @@ class RKDashboardTui(TuiMonsterApp):
     def on_start(self) -> None:
         self._init_colors()
         self._snapshot = self._sampler.sample_now()
+        self._history = self._sampler.history()
         self._last_collection = time.monotonic()
 
     def update(self) -> None:
@@ -122,6 +130,7 @@ class RKDashboardTui(TuiMonsterApp):
         now = time.monotonic()
         if now - self._last_collection >= self._collection_interval:
             self._snapshot = self._sampler.sample_now()
+            self._history = self._sampler.history()
             self._last_collection = now
 
     def draw(self) -> None:
@@ -156,12 +165,12 @@ class RKDashboardTui(TuiMonsterApp):
         try:
             curses.start_color()
             curses.use_default_colors()
-            curses.init_pair(1, curses.COLOR_GREEN, -1)    # normal/good
-            curses.init_pair(2, curses.COLOR_YELLOW, -1)   # attention/warning
-            curses.init_pair(3, curses.COLOR_RED, -1)      # critical
-            curses.init_pair(4, curses.COLOR_CYAN, -1)     # header/label
-            curses.init_pair(5, curses.COLOR_MAGENTA, -1)  # unavailable
-            curses.init_pair(6, curses.COLOR_WHITE, -1)    # dim/secondary
+            curses.init_pair(1, curses.COLOR_GREEN, -1)
+            curses.init_pair(2, curses.COLOR_YELLOW, -1)
+            curses.init_pair(3, curses.COLOR_RED, -1)
+            curses.init_pair(4, curses.COLOR_CYAN, -1)
+            curses.init_pair(5, curses.COLOR_MAGENTA, -1)
+            curses.init_pair(6, curses.COLOR_WHITE, -1)
             self._colors_initialized = True
         except curses.error:
             pass
@@ -192,16 +201,54 @@ class RKDashboardTui(TuiMonsterApp):
     def _attr_good(self) -> int:
         return self._color(1)
 
+    def _severity_attr(self, percent: float) -> int:
+        if percent >= 90:
+            return self._attr_critical()
+        if percent >= 70:
+            return self._attr_warn()
+        return self._attr_good()
+
+    def _temp_attr(self, celsius: float | None) -> int:
+        if celsius is None:
+            return self._attr_value()
+        if celsius >= 80:
+            return self._attr_critical()
+        if celsius >= 60:
+            return self._attr_warn()
+        return self._attr_value()
+
+    # -- Helpers --
+
+    def _make_bar(self, percent: float, width: int) -> str:
+        if self._ascii_only:
+            return bar_gauge(percent, width, "#", "-")
+        return bar_gauge(percent, width)
+
+    def _sparkline(self, values: list[float | None], width: int) -> str:
+        return render_sparkline(
+            values, width, ascii_only=self._ascii_only,
+        )
+
+    def _state_label(self, state: MetricState) -> str:
+        labels = {
+            MetricState.UNAVAILABLE: "unavailable",
+            MetricState.UNSUPPORTED: "unsupported",
+            MetricState.PERMISSION_DENIED: "permission denied",
+            MetricState.MALFORMED: "malformed data",
+            MetricState.STALE: "stale",
+            MetricState.STATIC_OR_UNTRUSTED: "unverified",
+        }
+        return labels.get(state, str(state))
+
     # -- Rendering: too-small screen --
 
     def _draw_too_small(self, height: int, width: int) -> None:
-        msg1 = "Terminal too small"
-        msg2 = f"Current: {width}x{height}  Minimum: 80x24"
-        msg3 = "Press q to exit"
         cy = max(0, height // 2 - 1)
-        self.center_text(cy, msg1, curses.A_BOLD)
-        self.center_text(cy + 1, msg2)
-        self.center_text(cy + 2, msg3)
+        self.center_text(cy, "Terminal too small", curses.A_BOLD)
+        self.center_text(
+            cy + 1, f"Current: {width}x{height}  Minimum: 80x24",
+        )
+        self.center_text(cy + 2, "Press q to exit")
 
     # -- Rendering: help overlay --
 
@@ -222,28 +269,42 @@ class RKDashboardTui(TuiMonsterApp):
         if height < 1:
             return
         y = height - 1
-        screen_name = SCREEN_NAMES.get(self._state.active_screen, "Unknown")
+        screen_name = SCREEN_NAMES.get(
+            self._state.active_screen, "Unknown",
+        )
         parts = [f" [{self._state.active_screen}] {screen_name}"]
         if self._state.is_paused:
             parts.append(" PAUSED")
-        parts.append(f"  {self._state.last_size[1]}x{self._state.last_size[0]}")
+        if self._force_compact:
+            parts.append(" [compact]")
+        sz = self._state.last_size
+        parts.append(f"  {sz[1]}x{sz[0]}")
         parts.append(f"  interval={self._collection_interval:.1f}s")
+        if self._snapshot:
+            ts = datetime.fromtimestamp(
+                self._snapshot.captured_at, tz=UTC,
+            )
+            parts.append(f"  {ts.strftime('%H:%M:%S')}Z")
         parts.append("  ?=help q=quit")
         status = "".join(parts)
         self.addstr(y, 0, status[:width].ljust(width), curses.A_REVERSE)
 
     # -- Rendering: overview screen --
 
-    def _draw_overview(self, height: int, width: int, mode: LayoutMode) -> None:
+    def _draw_overview(
+        self, height: int, width: int, mode: LayoutMode,
+    ) -> None:
         snap = self._snapshot
         if snap is None:
-            self.center_text(height // 2, "Collecting initial data...", curses.A_BOLD)
+            self.center_text(
+                height // 2, "Collecting initial data...", curses.A_BOLD,
+            )
             return
 
         y = 0
         y = self._draw_host_section(y, width, snap)
         y = self._draw_cpu_section(y, width, snap, mode)
-        y = self._draw_memory_section(y, width, snap)
+        y = self._draw_memory_section(y, width, snap, mode)
         y = self._draw_thermal_section(y, width, snap, mode)
         y = self._draw_storage_section(y, width, snap, mode)
         y = self._draw_network_section(y, width, snap, mode)
@@ -251,7 +312,11 @@ class RKDashboardTui(TuiMonsterApp):
         y = self._draw_npu_section(y, width, snap, mode)
         self._draw_processes_section(y, width, height, snap, mode)
 
-    def _draw_host_section(self, y: int, width: int, snap: DashboardSnapshot) -> int:
+    # -- Host --
+
+    def _draw_host_section(
+        self, y: int, width: int, snap: DashboardSnapshot,
+    ) -> int:
         host = snap.host
         title = host.hostname
         if host.model:
@@ -261,77 +326,104 @@ class RKDashboardTui(TuiMonsterApp):
         info = (
             f"Kernel: {host.kernel}  "
             f"Up: {format_uptime(host.uptime_seconds)}  "
-            f"Load: {host.load[0]:.2f} {host.load[1]:.2f} {host.load[2]:.2f}"
+            f"Load: {host.load[0]:.2f} {host.load[1]:.2f} "
+            f"{host.load[2]:.2f}"
         )
         self.addstr(y, 0, info[:width], self._attr_value())
         return y + 2
 
+    # -- CPU --
+
     def _draw_cpu_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         cpu_mv = snap.cpu
         if not cpu_mv.is_available or cpu_mv.value is None:
-            self.addstr(y, 0, "CPU: unavailable", self._attr_unavailable())
+            label = f"CPU: {self._state_label(cpu_mv.state)}"
+            self.addstr(y, 0, label[:width], self._attr_unavailable())
             return y + 1
         cpu = cpu_mv.value
-        bar_width = min(30, width - 25)
-        bar = bar_gauge(cpu.usage_percent, bar_width) if not self._ascii_only else \
-            bar_gauge(cpu.usage_percent, bar_width, "#", "-")
+
+        bar_w = min(30, max(5, width - 40))
+        bar = self._make_bar(cpu.usage_percent, bar_w)
         line = f"CPU  {bar} {format_percent(cpu.usage_percent):>6}"
-        self.addstr(y, 0, line[:width], self._cpu_attr(cpu.usage_percent))
+
+        # Sparkline
+        spark_w = min(20, max(0, width - len(line) - 2))
+        if spark_w > 3 and self._history:
+            cpu_hist = [h.cpu_percent for h in self._history]
+            spark = self._sparkline(cpu_hist, spark_w)
+            line += f" {spark}"
+
+        self.addstr(y, 0, line[:width], self._severity_attr(cpu.usage_percent))
         y += 1
 
         if mode != LayoutMode.COMPACT and cpu.cores:
             cores_per_line = 2 if width >= 100 else 1
-            core_items = []
+            items: list[str] = []
             for core in cpu.cores:
-                freq = format_frequency_mhz(core.frequency_khz) if core.frequency_khz else ""
-                core_items.append(
-                    f"  cpu{core.core_id}: {format_percent(core.usage_percent):>6} {freq}"
-                )
-            for i in range(0, len(core_items), cores_per_line):
-                line = "".join(core_items[i:i + cores_per_line])
-                self.addstr(y, 0, line[:width])
+                freq = ""
+                if core.frequency_khz:
+                    freq = format_frequency_mhz(core.frequency_khz)
+                pct = format_percent(core.usage_percent)
+                items.append(f"  cpu{core.core_id}: {pct:>6} {freq}")
+            for i in range(0, len(items), cores_per_line):
+                row = "".join(items[i:i + cores_per_line])
+                self.addstr(y, 0, row[:width])
                 y += 1
         return y + 1
 
-    def _cpu_attr(self, percent: float) -> int:
-        if percent >= 90:
-            return self._attr_critical()
-        if percent >= 70:
-            return self._attr_warn()
-        return self._attr_good()
+    # -- Memory --
 
-    def _draw_memory_section(self, y: int, width: int, snap: DashboardSnapshot) -> int:
+    def _draw_memory_section(
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
+    ) -> int:
         mem_mv = snap.memory
         if not mem_mv.is_available or mem_mv.value is None:
-            self.addstr(y, 0, "Memory: unavailable", self._attr_unavailable())
+            label = f"Memory: {self._state_label(mem_mv.state)}"
+            self.addstr(y, 0, label[:width], self._attr_unavailable())
             return y + 1
         mem = mem_mv.value
-        bar_width = min(30, width - 25)
-        bar = bar_gauge(mem.usage_percent, bar_width) if not self._ascii_only else \
-            bar_gauge(mem.usage_percent, bar_width, "#", "-")
+        bar_w = min(30, max(5, width - 40))
+        bar = self._make_bar(mem.usage_percent, bar_w)
         used = format_bytes(mem.used_bytes)
         total = format_bytes(mem.total_bytes)
-        line = f"MEM  {bar} {format_percent(mem.usage_percent):>6}  {used}/{total}"
-        self.addstr(y, 0, line[:width], self._cpu_attr(mem.usage_percent))
+        line = f"MEM  {bar} {format_percent(mem.usage_percent):>6}"
+        if mode != LayoutMode.COMPACT:
+            line += f"  {used}/{total}"
+
+        spark_w = min(20, max(0, width - len(line) - 2))
+        if spark_w > 3 and self._history:
+            mem_hist = [h.memory_percent for h in self._history]
+            spark = self._sparkline(mem_hist, spark_w)
+            line += f" {spark}"
+
+        self.addstr(
+            y, 0, line[:width], self._severity_attr(mem.usage_percent),
+        )
         y += 1
 
         swap_mv = snap.swap
         if swap_mv.is_available and swap_mv.value is not None:
             swap = swap_mv.value
             if swap.total_bytes > 0:
-                bar = bar_gauge(swap.usage_percent, bar_width) if not self._ascii_only else \
-                    bar_gauge(swap.usage_percent, bar_width, "#", "-")
-                used = format_bytes(swap.used_bytes)
-                total = format_bytes(swap.total_bytes)
-                line = f"SWP  {bar} {format_percent(swap.usage_percent):>6}  {used}/{total}"
-                self.addstr(y, 0, line[:width])
+                bar = self._make_bar(swap.usage_percent, bar_w)
+                su = format_bytes(swap.used_bytes)
+                st = format_bytes(swap.total_bytes)
+                swp = f"SWP  {bar} {format_percent(swap.usage_percent):>6}"
+                if mode != LayoutMode.COMPACT:
+                    swp += f"  {su}/{st}"
+                self.addstr(y, 0, swp[:width])
                 y += 1
         return y + 1
 
+    # -- Thermal --
+
     def _draw_thermal_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         thermal_mv = snap.thermal
         if not thermal_mv.is_available or thermal_mv.value is None:
@@ -342,135 +434,282 @@ class RKDashboardTui(TuiMonsterApp):
         temps = [z.temperature_c for z in zones if z.temperature_c is not None]
         max_temp = max(temps) if temps else None
         temp_str = format_temperature(max_temp)
-        attr = self._attr_value()
-        if max_temp is not None:
-            if max_temp >= 80:
-                attr = self._attr_critical()
-            elif max_temp >= 60:
-                attr = self._attr_warn()
-        self.addstr(y, 0, f"Thermal: {temp_str} max", attr)
+        attr = self._temp_attr(max_temp)
+
+        line = f"Thermal: {temp_str} max"
+
+        spark_w = min(20, max(0, width - 30))
+        if spark_w > 3 and self._history:
+            temp_hist = [h.max_temperature_c for h in self._history]
+            spark = self._sparkline(temp_hist, spark_w)
+            line += f"  {spark}"
+
+        self.addstr(y, 0, line[:width], attr)
+        y += 1
+
         if mode != LayoutMode.COMPACT:
-            zone_parts = [f"  {z.name}: {format_temperature(z.temperature_c)}" for z in zones[:4]]
-            self.addstr(y, 22, "".join(zone_parts)[:width - 22])
-        return y + 2
+            zone_parts = []
+            for z in zones[:4]:
+                zone_parts.append(
+                    f"  {z.name}: {format_temperature(z.temperature_c)}",
+                )
+            row = "".join(zone_parts)
+            self.addstr(y, 0, row[:width])
+            y += 1
+        return y + 1
+
+    # -- Storage --
 
     def _draw_storage_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         self.addstr(y, 0, "Storage", self._attr_label())
         y += 1
 
+        # Mounted filesystems
         disks_mv = snap.disks
         if disks_mv.is_available and disks_mv.value:
-            for disk in disks_mv.value[:4]:
-                bar_width = min(20, width - 50)
-                bar = bar_gauge(disk.usage_percent, bar_width) if not self._ascii_only else \
-                    bar_gauge(disk.usage_percent, bar_width, "#", "-")
-                line = (
-                    f"  {disk.mount:<15s} {bar} {format_percent(disk.usage_percent):>6}"
-                    f"  {format_bytes(disk.used_bytes)}/{format_bytes(disk.total_bytes)}"
-                )
+            limit = 2 if mode == LayoutMode.COMPACT else 4
+            for disk in disks_mv.value[:limit]:
+                bar_w = min(15, max(5, width - 55))
+                bar = self._make_bar(disk.usage_percent, bar_w)
+                used = format_bytes(disk.used_bytes)
+                total = format_bytes(disk.total_bytes)
+                pct = format_percent(disk.usage_percent)
+                if mode == LayoutMode.COMPACT:
+                    line = f"  {disk.mount:<12s} {bar} {pct:>6}"
+                else:
+                    line = (
+                        f"  {disk.mount:<15s} {bar} {pct:>6}"
+                        f"  {used}/{total}"
+                    )
                 self.addstr(y, 0, line[:width])
                 y += 1
 
+        # SD vs eMMC write distinction
         bio_mv = snap.block_io
         if bio_mv.is_available and bio_mv.value:
-            for dev in bio_mv.value:
-                kind = dev.kind or "?"
-                line = (
-                    f"  {dev.name} ({kind})"
-                    f"  W: {format_rate(dev.write_bytes_per_sec)}"
-                    f"  total: {format_bytes(dev.written_bytes_total)}"
-                )
-                self.addstr(y, 0, line[:width])
-                y += 1
+            sd_devs = [d for d in bio_mv.value if d.kind == "SD"]
+            emmc_devs = [d for d in bio_mv.value if d.kind == "MMC"]
+            other_devs = [
+                d for d in bio_mv.value
+                if d.kind not in ("SD", "MMC", None)
+            ]
+
+            if mode == LayoutMode.COMPACT:
+                # Single-line compact view
+                parts: list[str] = []
+                for d in sd_devs:
+                    parts.append(
+                        f"SD: W {format_rate(d.write_bytes_per_sec)}",
+                    )
+                for d in emmc_devs:
+                    parts.append(
+                        f"eMMC: W {format_rate(d.write_bytes_per_sec)}",
+                    )
+                if parts:
+                    self.addstr(y, 0, f"  {'  '.join(parts)}"[:width])
+                    y += 1
+            else:
+                for d in sd_devs:
+                    w_total = format_bytes(d.written_bytes_total)
+                    w_rate = format_rate(d.write_bytes_per_sec)
+                    line = f"  SD  {d.name:<12s} W: {w_rate:<14s} total: {w_total}"
+                    spark_w = min(15, max(0, width - len(line) - 2))
+                    if spark_w > 3 and self._history:
+                        sd_hist: list[float | None] = [
+                            h.sd_write_bytes_per_sec for h in self._history
+                        ]
+                        line += f" {self._sparkline(sd_hist, spark_w)}"
+                    self.addstr(y, 0, line[:width])
+                    y += 1
+                for d in emmc_devs:
+                    w_total = format_bytes(d.written_bytes_total)
+                    w_rate = format_rate(d.write_bytes_per_sec)
+                    line = (
+                        f"  eMMC {d.name:<10s} W: {w_rate:<14s}"
+                        f" total: {w_total}"
+                    )
+                    spark_w = min(15, max(0, width - len(line) - 2))
+                    if spark_w > 3 and self._history:
+                        emmc_hist: list[float | None] = [
+                            h.emmc_write_bytes_per_sec
+                            for h in self._history
+                        ]
+                        line += f" {self._sparkline(emmc_hist, spark_w)}"
+                    self.addstr(y, 0, line[:width])
+                    y += 1
+                for d in other_devs:
+                    w_rate = format_rate(d.write_bytes_per_sec)
+                    w_total = format_bytes(d.written_bytes_total)
+                    kind = d.kind or "?"
+                    line = (
+                        f"  {kind:<5s}{d.name:<10s} W: {w_rate:<14s}"
+                        f" total: {w_total}"
+                    )
+                    self.addstr(y, 0, line[:width])
+                    y += 1
         return y + 1
 
+    # -- Network --
+
     def _draw_network_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         net_mv = snap.network
         if not net_mv.is_available or net_mv.value is None:
-            return y
+            self.addstr(
+                y, 0, f"Network: {self._state_label(net_mv.state)}",
+                self._attr_unavailable(),
+            )
+            return y + 1
         interfaces = net_mv.value
-        if not interfaces:
-            return y
         active = [i for i in interfaces if i.name != "lo"]
         if not active:
-            return y
+            self.addstr(y, 0, "Network: no active interface", self._attr_unavailable())
+            return y + 1
+
         self.addstr(y, 0, "Network", self._attr_label())
         y += 1
-        for iface in active[:3]:
+        limit = 1 if mode == LayoutMode.COMPACT else 3
+        for iface in active[:limit]:
             state = iface.operstate or "?"
-            line = (
-                f"  {iface.name:<10s} {state:<6s}"
-                f"  RX: {format_rate(iface.rx_bytes_per_sec):<12s}"
-                f"  TX: {format_rate(iface.tx_bytes_per_sec)}"
-            )
+            rx = format_rate(iface.rx_bytes_per_sec)
+            tx = format_rate(iface.tx_bytes_per_sec)
+            if mode == LayoutMode.COMPACT:
+                line = f"  {iface.name} {state} RX:{rx} TX:{tx}"
+            else:
+                line = (
+                    f"  {iface.name:<10s} {state:<6s}"
+                    f"  RX: {rx:<12s}  TX: {tx}"
+                )
             self.addstr(y, 0, line[:width])
             y += 1
         return y + 1
 
+    # -- Battery / Power --
+
     def _draw_power_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         power_mv = snap.power
         if not power_mv.is_available or power_mv.value is None:
             return y
         supplies = power_mv.value.supplies
         if not supplies:
-            return y
-        battery = next((s for s in supplies if s.type == "Battery"), None)
+            self.addstr(
+                y, 0, "Battery: unsupported",
+                self._attr_unavailable(),
+            )
+            return y + 1
+        battery = next(
+            (s for s in supplies if s.type == "Battery"), None,
+        )
         if battery is None:
-            return y
-        cap = f"{battery.capacity_percent}%" if battery.capacity_percent is not None else "—"
+            self.addstr(
+                y, 0, "Battery: unsupported",
+                self._attr_unavailable(),
+            )
+            return y + 1
+        cap = "—"
+        if battery.capacity_percent is not None:
+            cap = f"{battery.capacity_percent}%"
         status = battery.status or "unknown"
         line = f"Battery: {cap} ({status})"
         if battery.voltage_uv is not None:
             line += f"  {battery.voltage_uv / 1_000_000:.2f}V"
-        self.addstr(y, 0, line[:width])
+        if battery.current_ua is not None and mode != LayoutMode.COMPACT:
+            line += f"  {battery.current_ua / 1_000:.0f}mA"
+        attr = self._attr_value()
+        if battery.capacity_percent is not None:
+            if battery.capacity_percent <= 10:
+                attr = self._attr_critical()
+            elif battery.capacity_percent <= 25:
+                attr = self._attr_warn()
+        self.addstr(y, 0, line[:width], attr)
         return y + 2
 
+    # -- NPU --
+
     def _draw_npu_section(
-        self, y: int, width: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, snap: DashboardSnapshot,
+        mode: LayoutMode,
     ) -> int:
         npu_mv = snap.npu
         if not npu_mv.is_available or npu_mv.value is None:
+            if npu_mv.state != MetricState.AVAILABLE:
+                label = f"NPU: {self._state_label(npu_mv.state)}"
+                self.addstr(y, 0, label[:width], self._attr_unavailable())
+                return y + 1
             return y
         npu = npu_mv.value
         if not npu.devices and npu.driver_version is None:
-            self.addstr(y, 0, "NPU: not detected", self._attr_unavailable())
+            self.addstr(
+                y, 0, "NPU: not detected", self._attr_unavailable(),
+            )
             return y + 1
-        parts = ["NPU:"]
+
+        parts: list[str] = ["NPU:"]
         if npu.driver_version:
             parts.append(f" driver {npu.driver_version}")
+
         for dev in npu.devices:
             freq = format_frequency_mhz(dev.frequency_hz)
-            if dev.load_percent is not None:
+            # Trust handling: never show load as a gauge if untrusted
+            if npu_mv.state == MetricState.STATIC_OR_UNTRUSTED:
+                parts.append("  load=? (unverified)")
+            elif dev.load_percent is not None:
                 parts.append(f"  load={dev.load_percent}%")
+            else:
+                parts.append("  load=—")
             parts.append(f"  freq={freq}")
-            if dev.governor:
+            if dev.governor and mode != LayoutMode.COMPACT:
                 parts.append(f"  gov={dev.governor}")
-        self.addstr(y, 0, "".join(parts)[:width])
+
+        attr = self._attr_value()
+        if npu_mv.state == MetricState.STATIC_OR_UNTRUSTED:
+            attr = self._attr_warn()
+        self.addstr(y, 0, "".join(parts)[:width], attr)
         return y + 2
 
+    # -- Processes --
+
     def _draw_processes_section(
-        self, y: int, width: int, height: int, snap: DashboardSnapshot, mode: LayoutMode
+        self, y: int, width: int, height: int,
+        snap: DashboardSnapshot, mode: LayoutMode,
     ) -> None:
         proc_mv = snap.processes
         if not proc_mv.is_available or proc_mv.value is None:
             return
         procs = proc_mv.value
-        available_lines = height - y - 1  # leave room for status line
-        if available_lines < 2:
+        available = height - y - 1
+        if available < 2:
             return
-        self.addstr(y, 0, f"Processes: {procs.count}", self._attr_label())
+        self.addstr(
+            y, 0, f"Processes: {procs.count}", self._attr_label(),
+        )
         y += 1
-        header = f"  {'PID':>7s}  {'Name':<20s}  {'RSS':>10s}  {'State'}"
-        self.addstr(y, 0, header[:width], curses.A_UNDERLINE)
-        y += 1
-        for proc in procs.top_memory[:min(8, available_lines - 1)]:
-            rss = format_bytes(proc.rss_bytes)
-            line = f"  {proc.pid:>7d}  {proc.name:<20s}  {rss:>10s}  {proc.state}"
-            self.addstr(y, 0, line[:width])
+
+        if mode == LayoutMode.COMPACT:
+            limit = min(3, available - 1)
+            for proc in procs.top_memory[:limit]:
+                rss = format_bytes(proc.rss_bytes)
+                line = f"  {proc.pid:>6d} {proc.name:<16s} {rss:>8s}"
+                self.addstr(y, 0, line[:width])
+                y += 1
+        else:
+            hdr = f"  {'PID':>7s}  {'Name':<20s}  {'RSS':>10s}  State"
+            self.addstr(y, 0, hdr[:width], curses.A_UNDERLINE)
             y += 1
+            limit = min(5, available - 1)
+            for proc in procs.top_memory[:limit]:
+                rss = format_bytes(proc.rss_bytes)
+                line = (
+                    f"  {proc.pid:>7d}  {proc.name:<20s}"
+                    f"  {rss:>10s}  {proc.state}"
+                )
+                self.addstr(y, 0, line[:width])
+                y += 1

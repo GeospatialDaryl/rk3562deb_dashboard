@@ -77,9 +77,9 @@ def test_no_npu_renders_without_crash() -> None:
     assert screen.out_of_bounds == []
 
 
-def test_battery_absent_renders_without_crash() -> None:
+def test_battery_absent_shows_unsupported() -> None:
     app, screen = make_app(fixture_root=FIXTURES / "battery_absent", height=40, width=140)
-    assert not screen.has_text("Battery")
+    assert screen.has_text("Battery: unsupported")
     assert screen.out_of_bounds == []
 
 
