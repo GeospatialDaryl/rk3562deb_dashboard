@@ -235,17 +235,36 @@ function drawSparkline(canvasId, series, options = {}) {
   const count = Math.max(...lines.map((line) => line.values.length));
 
   for (const line of lines) {
-    ctx.beginPath();
-    ctx.strokeStyle = line.color;
-    ctx.lineWidth = 1.5;
-    let started = false;
+    const points = [];
     line.values.forEach((value, index) => {
-      if (value == null) { started = false; return; }
+      if (value == null) return;
       const x = count > 1 ? (index / (count - 1)) * width : width;
       const y = height - 3 - ((value - min) / span) * (height - 6);
-      if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; }
+      points.push({ x, y });
     });
+    if (!points.length) continue;
+
+    const fillGrad = ctx.createLinearGradient(0, 0, 0, height);
+    fillGrad.addColorStop(0, line.color + "30");
+    fillGrad.addColorStop(1, line.color + "00");
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const cur = points[i];
+      const cpx = (prev.x + cur.x) / 2;
+      ctx.bezierCurveTo(cpx, prev.y, cpx, cur.y, cur.x, cur.y);
+    }
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = 1.8;
     ctx.stroke();
+
+    ctx.lineTo(points[points.length - 1].x, height);
+    ctx.lineTo(points[0].x, height);
+    ctx.closePath();
+    ctx.fillStyle = fillGrad;
+    ctx.fill();
   }
 }
 
