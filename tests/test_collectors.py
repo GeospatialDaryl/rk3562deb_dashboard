@@ -282,6 +282,35 @@ def test_npu_reads_devfreq_load_and_driver_version(tmp_path: Path) -> None:
     assert npu.devices[0].governor == "rknpu_ondemand"
 
 
+def test_npu_suspended_reports_zero_load(tmp_path: Path) -> None:
+    # The BSP devfreq load node latches the last powered sample (reads
+    # 100% forever after any NPU job); a runtime-suspended device is
+    # powered off, so the latched value must not be reported.
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/load", "100@1000000000Hz")
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/device/power/runtime_status", "suspended")
+
+    mv = collect_npu(tmp_path)
+    assert mv.is_available and mv.value is not None
+    assert mv.value.devices[0].load_percent == 0
+
+
+def test_npu_active_reports_devfreq_load(tmp_path: Path) -> None:
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/load", "73@1000000000Hz")
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/device/power/runtime_status", "active")
+
+    mv = collect_npu(tmp_path)
+    assert mv.is_available and mv.value is not None
+    assert mv.value.devices[0].load_percent == 73
+
+
+def test_npu_missing_runtime_status_falls_through(tmp_path: Path) -> None:
+    write(tmp_path, "/sys/class/devfreq/ff300000.npu/load", "42@1000000000Hz")
+
+    mv = collect_npu(tmp_path)
+    assert mv.is_available and mv.value is not None
+    assert mv.value.devices[0].load_percent == 42
+
+
 def test_npu_handles_missing_interfaces(tmp_path: Path) -> None:
     mv = collect_npu(tmp_path)
     assert mv.is_available and mv.value is not None
