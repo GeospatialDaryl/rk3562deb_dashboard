@@ -24,6 +24,8 @@ STATIC_DIR = Path(__file__).with_name("static")
 CONTROL_ACTIONS: dict[str, list[str]] = {
     "kiosk-restart": ["systemctl", "restart", "dashboard-kiosk-cog.service"],
     "sd-backup": ["systemctl", "start", "sd-backup.service"],
+    "switch-camera-cv": ["systemctl", "start", "camera-cv.service"],
+    "switch-dashboard": ["systemctl", "start", "dashboard-kiosk-cog.service"],
 }
 
 

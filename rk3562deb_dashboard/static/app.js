@@ -352,4 +352,8 @@ $("btn-sd-backup").addEventListener("click", () => {
   runControlAction("sd-backup", $("btn-sd-backup"));
 });
 
+$("btn-switch-camera-cv").addEventListener("click", () => {
+  runControlAction("switch-camera-cv", $("btn-switch-camera-cv"));
+});
+
 startPolling();

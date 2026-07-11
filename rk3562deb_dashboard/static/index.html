@@ -25,6 +25,26 @@
         <div class="load-strip" id="load-strip"></div>
       </section>
 
+      <section class="card" aria-labelledby="npu-title">
+        <div class="card-title">
+          <h2 id="npu-title">NPU</h2>
+          <span id="npu-freq" class="metric-big">--</span>
+        </div>
+        <div id="npu-list" class="stack"></div>
+      </section>
+
+      <section class="card" aria-labelledby="controls-title">
+        <div class="card-title">
+          <h2 id="controls-title">Controls</h2>
+        </div>
+        <div class="control-list">
+          <button type="button" class="btn" id="btn-kiosk-restart">Restart kiosk</button>
+          <button type="button" class="btn" id="btn-sd-backup">Run SD backup now</button>
+          <button type="button" class="btn" id="btn-switch-camera-cv">Switch to camera view</button>
+        </div>
+        <p id="control-status" class="muted"></p>
+      </section>
+
       <section class="card span-2" aria-labelledby="cpu-title">
         <div class="card-title">
           <h2 id="cpu-title">CPU</h2>
@@ -102,25 +122,6 @@
         <canvas id="write-spark" class="spark" height="44"></canvas>
         <p class="muted spark-legend">write rate · <span class="legend-sd">SD</span> · <span class="legend-emmc">eMMC</span></p>
         <div id="block-io-list" class="table-list"></div>
-      </section>
-
-      <section class="card" aria-labelledby="npu-title">
-        <div class="card-title">
-          <h2 id="npu-title">NPU</h2>
-          <span id="npu-freq" class="metric-big">--</span>
-        </div>
-        <div id="npu-list" class="stack"></div>
-      </section>
-
-      <section class="card" aria-labelledby="controls-title">
-        <div class="card-title">
-          <h2 id="controls-title">Controls</h2>
-        </div>
-        <div class="control-list">
-          <button type="button" class="btn" id="btn-kiosk-restart">Restart kiosk</button>
-          <button type="button" class="btn" id="btn-sd-backup">Run SD backup now</button>
-        </div>
-        <p id="control-status" class="muted"></p>
       </section>
     </main>
 

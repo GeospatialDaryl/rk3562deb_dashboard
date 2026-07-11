@@ -145,9 +145,12 @@ h2 { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; }
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 20px;
+  /* No backdrop-filter here: it was on every card (~12 of them) and forces a
+     recomposite of everything behind each one on every scroll frame -- on
+     cog/WPE + Mali this was tanking scroll frame rate, the same class of
+     issue as the infinite pulse animation fixed in 6578281. status-pill
+     keeps its blur since that's a single small element, not ~12 of them. */
   background: var(--panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
   min-height: 180px;
   transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
