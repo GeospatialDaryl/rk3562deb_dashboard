@@ -290,10 +290,13 @@ h2 { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; }
 }
 
 .control-list {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
 }
+
+.control-list .btn { flex: 1 1 auto; }
 
 .btn {
   font-family: inherit;
