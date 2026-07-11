@@ -307,7 +307,7 @@ let pollTimer = null;
 function startPolling() {
   if (pollTimer === null) {
     refresh();
-    pollTimer = setInterval(refresh, 2000);
+    pollTimer = setInterval(refresh, 30000);
   }
 }
 
@@ -320,6 +320,36 @@ function stopPolling() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) stopPolling(); else startPolling();
+});
+
+async function runControlAction(action, button) {
+  const status = $("control-status");
+  button.disabled = true;
+  status.className = "muted";
+  status.textContent = "Running…";
+  try {
+    const response = await fetch(`/api/control/${action}`, { method: "POST" });
+    const body = await response.json();
+    if (response.ok && body.ok) {
+      status.className = "ok";
+      status.textContent = `${action} succeeded`;
+    } else {
+      status.className = "err";
+      status.textContent = `${action} failed: ${body.error || body.stderr || response.status}`;
+    }
+  } catch (error) {
+    status.className = "err";
+    status.textContent = `${action} failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("btn-kiosk-restart").addEventListener("click", () => {
+  runControlAction("kiosk-restart", $("btn-kiosk-restart"));
+});
+$("btn-sd-backup").addEventListener("click", () => {
+  runControlAction("sd-backup", $("btn-sd-backup"));
 });
 
 startPolling();

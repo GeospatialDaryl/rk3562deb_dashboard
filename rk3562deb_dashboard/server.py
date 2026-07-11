@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from argparse import ArgumentParser
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,16 @@ from .sampler import SAMPLE_INTERVAL_SECONDS, DashboardSampler
 from .serialization import history_point_to_dict, snapshot_to_dict
 
 STATIC_DIR = Path(__file__).with_name("static")
+
+# Fixed allow-list of systemctl invocations the dashboard may trigger.
+# Each entry is authorized narrowly by a matching polkit rule (see
+# packaging/49-samwise-dashboard-ctl.rules) so the unprivileged dashboard
+# process can request exactly these actions without sudo/setuid (blocked
+# anyway by NoNewPrivileges=true on this service).
+CONTROL_ACTIONS: dict[str, list[str]] = {
+    "kiosk-restart": ["systemctl", "restart", "dashboard-kiosk-cog.service"],
+    "sd-backup": ["systemctl", "start", "sd-backup.service"],
+}
 
 
 # Keep the old dict-based helper for backward compatibility with tests
@@ -67,7 +78,8 @@ class DashboardServer(ThreadingHTTPServer):
         }
 
     def server_close(self) -> None:
-        self.sampler.stop()
+        if hasattr(self, "sampler"):
+            self.sampler.stop()
         super().server_close()
 
 
@@ -94,14 +106,40 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.path = "/index.html"
         super().do_GET()
 
+    def do_POST(self) -> None:  # noqa: N802 - stdlib hook name
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/control/"):
+            action = parsed.path.removeprefix("/api/control/")
+            self._run_control_action(action)
+            return
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def _run_control_action(self, action: str) -> None:
+        command = CONTROL_ACTIONS.get(action)
+        if command is None:
+            self._send_json({"ok": False, "error": "unknown action"}, status=HTTPStatus.NOT_FOUND)
+            return
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=15, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
+            return
+        ok = result.returncode == 0
+        self._send_json(
+            {"ok": ok, "returncode": result.returncode, "stderr": result.stderr.strip()},
+            status=HTTPStatus.OK if ok else HTTPStatus.BAD_GATEWAY,
+        )
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
-    def _send_json(self, payload: dict[str, Any]) -> None:
+    def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
