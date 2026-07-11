@@ -142,6 +142,8 @@ class ProcessInfo:
     name: str
     state: str
     rss_bytes: int
+    cpu_percent: float = 0.0
+    cmdline: str = ""
 
 
 @dataclass(frozen=True, slots=True)

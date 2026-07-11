@@ -127,17 +127,11 @@ h2 { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; }
 
 .status-pill.online::before {
   box-shadow: 0 0 8px currentColor;
-  animation: pulse 2s ease-in-out infinite;
 }
 
 .status-pill.offline {
   color: var(--red);
   border-color: rgba(255, 107, 129, 0.2);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
 }
 
 .grid {
@@ -291,6 +285,33 @@ h2 { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; }
   display: grid;
   gap: 8px;
 }
+
+.control-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn:hover { border-color: var(--cyan); }
+.btn:active { background: rgba(66, 217, 245, 0.12); }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+
+#control-status { margin: 10px 0 0; min-height: 1.2em; }
+#control-status.ok { color: var(--green); }
+#control-status.err { color: var(--red); }
 
 .table-row {
   display: grid;
