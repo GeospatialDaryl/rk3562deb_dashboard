@@ -20,6 +20,7 @@ from .formatting import (
     format_uptime,
 )
 from .layout import LayoutMode, compute_layout
+from .screens.process import SORT_CYCLE, draw_process_screen
 from .state import SCREEN_NAMES, ScreenId, TuiState
 from .widgets.sparkline import render_sparkline
 
@@ -36,6 +37,7 @@ HELP_TEXT = [
     "  r                Immediate refresh",
     "  d                Toggle detail info",
     "  c                Toggle compact mode",
+    "  s                Cycle process sort (CPU/MEM/PID/Name)",
     "",
     "  Screens: 1=Overview  2=CPU  3=Storage  4=Network",
     "           5=Thermal/Power  6=NPU/Rockchip  7=Processes",
@@ -94,6 +96,12 @@ class RKDashboardTui(TuiMonsterApp):
     def _toggle_compact(self, _key: int) -> None:
         self._force_compact = not self._force_compact
 
+    @key_binding(ord("s"))
+    def _cycle_process_sort(self, _key: int) -> None:
+        cur = self._state.selected_process_sort
+        idx = SORT_CYCLE.index(cur) if cur in SORT_CYCLE else -1
+        self._state.selected_process_sort = SORT_CYCLE[(idx + 1) % len(SORT_CYCLE)]
+
     @key_binding(ord("\t"))
     def _next_screen(self, _key: int) -> None:
         self._state.next_screen()
@@ -145,6 +153,8 @@ class RKDashboardTui(TuiMonsterApp):
             self._draw_too_small(height, width)
         elif self._state.show_help:
             self._draw_help(height, width)
+        elif self._state.active_screen == ScreenId.PROCESSES:
+            draw_process_screen(self, 0, width, height)
         else:
             effective_mode = layout.mode
             if self._force_compact and effective_mode != LayoutMode.COMPACT:
@@ -697,19 +707,21 @@ class RKDashboardTui(TuiMonsterApp):
             limit = min(3, available - 1)
             for proc in procs.top_memory[:limit]:
                 rss = format_bytes(proc.rss_bytes)
-                line = f"  {proc.pid:>6d} {proc.name:<16s} {rss:>8s}"
+                cpu = f"{proc.cpu_percent:.1f}%"
+                line = f"  {proc.pid:>6d} {proc.name:<16s} {cpu:>6s} {rss:>8s}"
                 self.addstr(y, 0, line[:width])
                 y += 1
         else:
-            hdr = f"  {'PID':>7s}  {'Name':<20s}  {'RSS':>10s}  State"
+            hdr = f"  {'PID':>7s}  {'Name':<20s}  {'CPU%':>6s}  {'RSS':>10s}  State"
             self.addstr(y, 0, hdr[:width], curses.A_UNDERLINE)
             y += 1
             limit = min(5, available - 1)
             for proc in procs.top_memory[:limit]:
                 rss = format_bytes(proc.rss_bytes)
+                cpu = f"{proc.cpu_percent:.1f}"
                 line = (
                     f"  {proc.pid:>7d}  {proc.name:<20s}"
-                    f"  {rss:>10s}  {proc.state}"
+                    f"  {cpu:>6s}  {rss:>10s}  {proc.state}"
                 )
                 self.addstr(y, 0, line[:width])
                 y += 1

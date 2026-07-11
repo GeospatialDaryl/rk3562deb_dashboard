@@ -12,6 +12,7 @@ from ..collectors import CollectorState, collect_snapshot
 from ..sampler import DashboardSampler
 from ..serialization import snapshot_to_dict
 from .app import RKDashboardTui
+from .crashlog import install_crash_handler
 
 
 def build_parser() -> ArgumentParser:
@@ -62,6 +63,7 @@ SCREEN_MAP = {
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    install_crash_handler()
 
     if args.version:
         from .. import __version__
