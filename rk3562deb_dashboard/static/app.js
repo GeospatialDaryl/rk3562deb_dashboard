@@ -361,4 +361,8 @@ $("btn-switch-camera-cv").addEventListener("click", () => {
   runControlAction("switch-camera-cv", $("btn-switch-camera-cv"));
 });
 
+$("btn-display-off").addEventListener("click", () => {
+  runControlAction("display-off", $("btn-display-off"));
+});
+
 startPolling();
