@@ -168,8 +168,13 @@ const npuLoadValues = new Set();
 function renderNpu(npu) {
   const devices = npu?.devices || [];
   const primary = devices[0];
+  const loadPct = primary?.load_percent;
   $("npu-freq").textContent = primary ? freq(primary.frequency_hz) : "n/a";
-  if (primary?.load_percent != null) npuLoadValues.add(primary.load_percent);
+  $("npu-freq").className =
+    `metric-big${loadPct >= 80 ? " metric-alert" : loadPct >= 50 ? " metric-warn" : ""}`;
+  setBar("npu-bar", loadPct || 0);
+  $("npu-bar").className = loadPct >= 80 ? "bar-alert" : loadPct >= 50 ? "bar-warn" : "";
+  if (loadPct != null) npuLoadValues.add(loadPct);
   const rows = devices.map((device) => `
     <div class="row">
       <strong>${esc(device.name)}</strong>
