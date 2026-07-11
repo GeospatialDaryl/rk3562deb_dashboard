@@ -26,6 +26,8 @@ CONTROL_ACTIONS: dict[str, list[str]] = {
     "sd-backup": ["systemctl", "start", "sd-backup.service"],
     "switch-camera-cv": ["systemctl", "start", "camera-cv.service"],
     "switch-dashboard": ["systemctl", "start", "dashboard-kiosk-cog.service"],
+    "transcribe-start": ["systemctl", "start", "audio-transcribe.service"],
+    "transcribe-stop": ["systemctl", "stop", "audio-transcribe.service"],
     "display-off": ["systemctl", "start", "display-off.service"],
 }
 

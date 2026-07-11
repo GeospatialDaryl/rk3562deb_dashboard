@@ -361,6 +361,13 @@ $("btn-switch-camera-cv").addEventListener("click", () => {
   runControlAction("switch-camera-cv", $("btn-switch-camera-cv"));
 });
 
+$("btn-transcribe-start").addEventListener("click", () => {
+  runControlAction("transcribe-start", $("btn-transcribe-start"));
+});
+$("btn-transcribe-stop").addEventListener("click", () => {
+  runControlAction("transcribe-stop", $("btn-transcribe-stop"));
+});
+
 $("btn-display-off").addEventListener("click", () => {
   runControlAction("display-off", $("btn-display-off"));
 });
