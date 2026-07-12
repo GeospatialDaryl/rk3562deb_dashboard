@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WiFi</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="shell header">
+      <div>
+        <p class="eyebrow">network</p>
+        <h1>WiFi</h1>
+      </div>
+      <div class="header-side">
+        <a class="btn home-link" href="/">⌂ Launcher</a>
+        <div class="status-pill" id="connection">Connecting…</div>
+      </div>
+    </header>
+
+    <main class="shell wifi-shell">
+      <section class="card wifi-status-card" aria-label="Current connection">
+        <div class="status-item"><small>network</small><strong id="wifi-ssid">--</strong></div>
+        <div class="status-item"><small>signal</small><strong id="wifi-signal">--</strong></div>
+        <div class="status-item"><small>ip address</small><strong id="wifi-ip">--</strong></div>
+        <div class="status-item"><small>radio</small><strong id="wifi-radio">--</strong></div>
+      </section>
+
+      <section class="card" aria-labelledby="networks-title">
+        <div class="card-title">
+          <h2 id="networks-title">Networks</h2>
+          <button type="button" class="btn" id="btn-rescan">Rescan</button>
+        </div>
+        <div class="wifi-list" id="wifi-list">
+          <p class="muted">Scanning…</p>
+        </div>
+      </section>
+
+      <p id="wifi-result" class="muted shell"></p>
+    </main>
+
+    <script src="/wifi.js" type="module"></script>
+  </body>
+</html>

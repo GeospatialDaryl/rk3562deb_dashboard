@@ -10,8 +10,9 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
+from . import wifi
 from .sampler import SAMPLE_INTERVAL_SECONDS, DashboardSampler
 from .serialization import history_point_to_dict, snapshot_to_dict
 
@@ -75,6 +76,15 @@ CV_DEMOS: tuple[str, ...] = (
 def runtime_dir() -> Path:
     """The per-user runtime dir where cam_detect's demo state file lives."""
     return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+
+
+WIFI_DEVICE = "wlan0"
+
+
+def _nmcli(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["nmcli", *args], capture_output=True, text=True, timeout=timeout, check=False
+    )
 
 
 # Keep the old dict-based helper for backward compatibility with tests
@@ -155,16 +165,28 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/launcher-status":
             self._send_json(self._launcher_status())
             return
+        if parsed.path == "/api/wifi/status":
+            self._send_json(self._wifi_status())
+            return
+        if parsed.path == "/api/wifi/scan":
+            rescan = parse_qs(parsed.query).get("rescan", ["no"])[0] == "yes"
+            self._wifi_scan(rescan)
+            return
         # The launcher is the kiosk home page (ADR-007); the metrics
         # dashboard moved to /dashboard.
         if parsed.path == "/":
             self.path = "/launcher.html"
         elif parsed.path == "/dashboard":
             self.path = "/index.html"
+        elif parsed.path == "/wifi":
+            self.path = "/wifi.html"
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib hook name
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/wifi/"):
+            self._wifi_post(parsed.path.removeprefix("/api/wifi/"))
+            return
         if parsed.path == "/api/control/set-cv-demo":
             self._set_cv_demo()
             return
@@ -176,15 +198,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def _set_cv_demo(self) -> None:
         """Write the demo state file cam_detect.py polls (plain file, no privilege)."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(length) or b"{}")
-            demo = body.get("demo") if isinstance(body, dict) else None
-        except (ValueError, json.JSONDecodeError):
+        body = self._read_json_body()
+        if body is None:
             self._send_json(
                 {"ok": False, "error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST
             )
             return
+        demo = body.get("demo")
         if demo not in CV_DEMOS:
             self._send_json(
                 {"ok": False, "error": "unknown demo"}, status=HTTPStatus.BAD_REQUEST
@@ -197,6 +217,167 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
             return
         self._send_json({"ok": True, "demo": demo})
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        """Parse the request body as a JSON object; None when malformed."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            return None
+        return body if isinstance(body, dict) else None
+
+    def _wifi_status(self) -> dict[str, Any]:
+        status: dict[str, Any] = {
+            "radio": None,
+            "device_state": None,
+            "ssid": None,
+            "signal": None,
+            "ip4": None,
+        }
+        try:
+            radio = _nmcli(["-t", "-f", "WIFI", "radio"], timeout=5)
+            if radio.returncode == 0:
+                status["radio"] = radio.stdout.strip()
+            show = _nmcli(
+                [
+                    "-t",
+                    "-f",
+                    "GENERAL.CONNECTION,GENERAL.STATE,IP4.ADDRESS",
+                    "device",
+                    "show",
+                    WIFI_DEVICE,
+                ],
+                timeout=5,
+            )
+            if show.returncode == 0:
+                for line in show.stdout.splitlines():
+                    fields = wifi.parse_terse(line)
+                    if len(fields) < 2:
+                        continue
+                    key, value = fields[0], fields[1]
+                    if key == "GENERAL.CONNECTION" and value:
+                        status["ssid"] = value
+                    elif key == "GENERAL.STATE":
+                        status["device_state"] = value
+                    elif key.startswith("IP4.ADDRESS") and status["ip4"] is None:
+                        status["ip4"] = value
+            cached = _nmcli(
+                ["-t", "-f", "ACTIVE,SSID,SIGNAL,SECURITY", "device", "wifi", "list",
+                 "--rescan", "no"],
+                timeout=5,
+            )
+            if cached.returncode == 0:
+                for row in wifi.parse_wifi_list(cached.stdout):
+                    if row["in_use"]:
+                        status["signal"] = row["signal"]
+                        break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return status
+
+    def _known_wifi_names(self) -> set[str]:
+        result = _nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"], timeout=5)
+        return wifi.parse_connections(result.stdout) if result.returncode == 0 else set()
+
+    def _wifi_scan(self, rescan: bool) -> None:
+        try:
+            scan = _nmcli(
+                ["-t", "-f", "ACTIVE,SSID,SIGNAL,SECURITY", "device", "wifi", "list",
+                 "--rescan", "yes" if rescan else "no"],
+                timeout=25 if rescan else 5,
+            )
+            known = self._known_wifi_names()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
+            return
+        if scan.returncode != 0:
+            self._send_json(
+                {"ok": False, "error": scan.stderr.strip() or "scan failed"},
+                status=HTTPStatus.BAD_GATEWAY,
+            )
+            return
+        networks = wifi.merge_scan(wifi.parse_wifi_list(scan.stdout), known)
+        self._send_json({"ok": True, "networks": networks})
+
+    def _wifi_post(self, action: str) -> None:
+        # Anything that changes network state or carries credentials is only
+        # accepted from the device itself; the LAN gets read-only access.
+        if not wifi.is_local(self.client_address):
+            self._send_json(
+                {"ok": False, "error": "wifi changes are only accepted from the device"},
+                status=HTTPStatus.FORBIDDEN,
+            )
+            return
+        body = self._read_json_body()
+        if body is None:
+            self._send_json(
+                {"ok": False, "error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST
+            )
+            return
+        if action == "connect":
+            self._wifi_connect(body)
+        elif action == "forget":
+            self._wifi_forget(body)
+        else:
+            self._send_json(
+                {"ok": False, "error": "unknown action"}, status=HTTPStatus.NOT_FOUND
+            )
+
+    def _wifi_connect(self, body: dict[str, Any]) -> None:
+        ssid = body.get("ssid")
+        psk = body.get("psk") or None
+        problem = wifi.validate_connect_request(ssid, psk)
+        if problem is not None:
+            self._send_json({"ok": False, "error": problem}, status=HTTPStatus.BAD_REQUEST)
+            return
+        assert isinstance(ssid, str)
+        try:
+            known_before = self._known_wifi_names()
+            if ssid in known_before and psk is None:
+                argv = ["--wait", "40", "connection", "up", "id", ssid]
+            else:
+                argv = ["--wait", "40", "device", "wifi", "connect", ssid]
+                if psk is not None:
+                    argv += ["password", psk]
+            result = _nmcli(argv, timeout=45)
+            if result.returncode == 0:
+                self._send_json({"ok": True, "ssid": ssid})
+                return
+            # A failed first join leaves a half-configured profile behind,
+            # which would make the retry take the known-network path and
+            # fail differently; delete it so retries are clean.
+            if ssid not in known_before and ssid in self._known_wifi_names():
+                _nmcli(["connection", "delete", "id", ssid], timeout=10)
+            detail = result.stderr.strip() or result.stdout.strip()
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": wifi.classify_connect_error(result.returncode, result.stderr),
+                    "detail": detail.splitlines()[0] if detail else "",
+                },
+                status=HTTPStatus.BAD_GATEWAY,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
+
+    def _wifi_forget(self, body: dict[str, Any]) -> None:
+        name = body.get("name")
+        if not isinstance(name, str) or not name:
+            self._send_json(
+                {"ok": False, "error": "name is required"}, status=HTTPStatus.BAD_REQUEST
+            )
+            return
+        try:
+            result = _nmcli(["connection", "delete", "id", name], timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
+            return
+        ok = result.returncode == 0
+        self._send_json(
+            {"ok": ok, "error": None if ok else (result.stderr.strip() or "delete failed")},
+            status=HTTPStatus.OK if ok else HTTPStatus.BAD_GATEWAY,
+        )
 
     def _launcher_status(self) -> dict[str, Any]:
         active_app = None
@@ -232,12 +413,27 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             cv_demo = name if name in CV_DEMOS else None
         except OSError:
             pass
+        wifi_summary: dict[str, Any] = {"ssid": None, "signal": None}
+        try:
+            cached = _nmcli(
+                ["-t", "-f", "ACTIVE,SSID,SIGNAL,SECURITY", "device", "wifi", "list",
+                 "--rescan", "no"],
+                timeout=5,
+            )
+            if cached.returncode == 0:
+                for row in wifi.parse_wifi_list(cached.stdout):
+                    if row["in_use"]:
+                        wifi_summary = {"ssid": row["ssid"], "signal": row["signal"]}
+                        break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         return {
             "active_app": active_app,
             "battery": battery,
             "power_profile": power_profile,
             "cv_demo": cv_demo,
             "cv_demos": list(CV_DEMOS),
+            "wifi": wifi_summary,
         }
 
     def _run_control_action(self, action: str) -> None:

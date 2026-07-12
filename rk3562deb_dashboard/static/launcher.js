@@ -65,6 +65,8 @@ function renderStatus(data) {
   $("status-profile").textContent = data.power_profile || "n/a";
   $("power-label").textContent = data.power_profile || "--";
   $("status-demo").textContent = data.cv_demo || "default";
+  const wifi = data.wifi || {};
+  $("wifi-summary").textContent = wifi.ssid ? `${wifi.ssid} · ${wifi.signal}%` : "not connected";
   $("camera-demo").textContent = data.cv_demo || "yolov8";
   for (const [tileId, app] of [
     ["tile-dashboard", "dashboard"],
