@@ -12,11 +12,14 @@ ExecStart=/home/frodo/venvs/dashboard/bin/rk-dashboard --host 0.0.0.0 --port 876
 Restart=on-failure
 RestartSec=5
 
-# The dashboard only reads procfs/sysfs and serves HTTP.
+# The dashboard only reads procfs/sysfs and serves HTTP, plus one writable
+# path: cam_detect's demo state file under /run/user/1001 (set-cv-demo).
+# '-' so a missing dir (no user session, no linger) doesn't fail startup.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+ReadWritePaths=-/run/user/1001
 
 [Install]
 WantedBy=multi-user.target

@@ -13,8 +13,8 @@ from pathlib import Path
 from .collectors import CollectorState, collect_snapshot
 from .models import DashboardSnapshot, HistoryPoint
 
-SAMPLE_INTERVAL_SECONDS = 2.0
-HISTORY_SIZE = 300  # 10 minutes at the default interval
+SAMPLE_INTERVAL_SECONDS = 5.0
+HISTORY_SIZE = 180  # 15 minutes at the default interval
 
 
 def make_history_point(snapshot: DashboardSnapshot) -> HistoryPoint:

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RK3562 Launcher</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="shell header">
+      <div>
+        <p class="eyebrow">appliance home</p>
+        <h1>Launcher</h1>
+      </div>
+      <div class="status-pill" id="connection">Connecting…</div>
+    </header>
+
+    <main class="shell launcher">
+      <section class="card launcher-status" aria-label="Device status">
+        <div class="status-item"><small>active app</small><strong id="status-app">--</strong></div>
+        <div class="status-item"><small>battery</small><strong id="status-battery">--</strong></div>
+        <div class="status-item"><small>power profile</small><strong id="status-profile">--</strong></div>
+        <div class="status-item"><small>cv demo</small><strong id="status-demo">--</strong></div>
+      </section>
+
+      <a class="card app-tile" id="tile-dashboard" href="/dashboard">
+        <span class="tile-glyph">▦</span>
+        <span class="tile-body">
+          <strong>Dashboard</strong>
+          <small>system metrics · controls</small>
+        </span>
+      </a>
+
+      <button type="button" class="card app-tile" id="tile-mapping">
+        <span class="tile-glyph">◈</span>
+        <span class="tile-body">
+          <strong>Mapping</strong>
+          <small>camera mapping view</small>
+        </span>
+      </button>
+
+      <section class="card camera-tile" aria-labelledby="camera-title">
+        <button type="button" class="app-tile tile-inline" id="tile-camera">
+          <span class="tile-glyph">◉</span>
+          <span class="tile-body">
+            <strong id="camera-title">Camera CV</strong>
+            <small>NPU detection · demo: <span id="camera-demo">--</span></small>
+          </span>
+        </button>
+        <div class="demo-chips" id="demo-chips"></div>
+      </section>
+
+      <button type="button" class="card app-tile tile-dim" id="tile-display-off">
+        <span class="tile-glyph">◐</span>
+        <span class="tile-body">
+          <strong>Display off</strong>
+          <small>blank the panel</small>
+        </span>
+      </button>
+
+      <section class="card launcher-utils" aria-label="Utilities">
+        <button type="button" class="btn util-btn" id="btn-power-toggle">Power: <span id="power-label">--</span></button>
+        <button type="button" class="btn util-btn" id="btn-sd-backup">SD backup</button>
+        <button type="button" class="btn util-btn" id="btn-kiosk-restart">Restart kiosk</button>
+      </section>
+
+      <p id="control-status" class="muted shell"></p>
+    </main>
+
+    <script src="/launcher.js" type="module"></script>
+  </body>
+</html>

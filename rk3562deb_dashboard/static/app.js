@@ -312,7 +312,7 @@ let pollTimer = null;
 function startPolling() {
   if (pollTimer === null) {
     refresh();
-    pollTimer = setInterval(refresh, 30000);
+    pollTimer = setInterval(refresh, 15000);
   }
 }
 

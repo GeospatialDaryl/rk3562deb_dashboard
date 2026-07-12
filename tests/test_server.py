@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
@@ -55,17 +56,80 @@ def test_snapshot_has_all_sections(base_url: str) -> None:
         assert key in snapshot
 
 
-def test_root_serves_index(base_url: str) -> None:
+def test_root_serves_launcher(base_url: str) -> None:
     with urllib.request.urlopen(f"{base_url}/") as response:
         assert response.status == 200
+        assert b"RK3562 Launcher" in response.read()
+
+
+def test_dashboard_route_serves_index(base_url: str) -> None:
+    with urllib.request.urlopen(f"{base_url}/dashboard") as response:
+        assert response.status == 200
         assert b"RK3562 Debian Dashboard" in response.read()
+
+
+def test_launcher_status_shape(base_url: str) -> None:
+    from rk3562deb_dashboard.server import CV_DEMOS
+
+    with urllib.request.urlopen(f"{base_url}/api/launcher-status") as response:
+        assert response.status == 200
+        status = json.loads(response.read())
+    for key in ("active_app", "battery", "power_profile", "cv_demo", "cv_demos"):
+        assert key in status
+    assert status["cv_demos"] == list(CV_DEMOS)
+    assert set(status["battery"]) == {"status", "capacity_percent"}
+
+
+def _post(url: str, body: bytes | None = None) -> tuple[int, dict[str, object]]:
+    request = urllib.request.Request(url, data=body or b"", method="POST")
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read())
+
+
+def test_set_cv_demo_writes_state_file(
+    base_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    status, payload = _post(
+        f"{base_url}/api/control/set-cv-demo", json.dumps({"demo": "resnet"}).encode()
+    )
+    assert status == 200
+    assert payload == {"ok": True, "demo": "resnet"}
+    assert (tmp_path / "cv-demo-current").read_text() == "resnet\n"
+
+
+def test_set_cv_demo_rejects_unknown_demo(
+    base_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    status, payload = _post(
+        f"{base_url}/api/control/set-cv-demo", json.dumps({"demo": "rm -rf"}).encode()
+    )
+    assert status == 400
+    assert payload["ok"] is False
+    assert not (tmp_path / "cv-demo-current").exists()
+
+
+def test_set_cv_demo_rejects_invalid_json(base_url: str) -> None:
+    status, payload = _post(f"{base_url}/api/control/set-cv-demo", b"not json")
+    assert status == 400
+    assert payload["ok"] is False
+
+
+def test_unknown_control_action_is_404(base_url: str) -> None:
+    status, payload = _post(f"{base_url}/api/control/definitely-not-real")
+    assert status == 404
+    assert payload["ok"] is False
 
 
 def test_history_endpoint_returns_compact_points(base_url: str) -> None:
     with urllib.request.urlopen(f"{base_url}/api/history") as response:
         assert response.status == 200
         history = json.loads(response.read())
-    assert history["interval_seconds"] == 2.0
+    assert history["interval_seconds"] == 5.0
     assert len(history["points"]) >= 1
     point = history["points"][0]
     for key in ("t", "cpu", "mem", "temp", "sd_write", "emmc_write"):

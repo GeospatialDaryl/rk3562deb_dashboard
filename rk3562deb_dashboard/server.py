@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from argparse import ArgumentParser
 from http import HTTPStatus
@@ -29,7 +30,51 @@ CONTROL_ACTIONS: dict[str, list[str]] = {
     "transcribe-start": ["systemctl", "start", "audio-transcribe.service"],
     "transcribe-stop": ["systemctl", "stop", "audio-transcribe.service"],
     "display-off": ["systemctl", "start", "display-off.service"],
+    "switch-mapping": ["systemctl", "start", "mapping-cv.service"],
+    # Deviates from the systemctl-only shape (see ADR-007): still a fixed
+    # argv, authorized by polkit rule 51- via power-profiles-daemon.
+    "power-toggle": ["/home/frodo/bin/power-toggle"],
 }
+
+# Screen-owning apps the launcher can report on / switch to.  Mirrors
+# ~/build/app-switcher/apps.json plus the display-off oneshot; systemd
+# Conflicts= guarantees at most one is active.
+APP_UNITS: dict[str, str] = {
+    "dashboard": "dashboard-kiosk-cog.service",
+    "camera-cv": "camera-cv.service",
+    "mapping": "mapping-cv.service",
+    "display-off": "display-off.service",
+}
+
+# CV demos selectable from the launcher.  Source of truth is the DEMOS list
+# in ~/src/camera-npu/demos/__init__.py (cam_detect.py validates unknown
+# names anyway); kept as a literal here to avoid a cross-repo import.
+CV_DEMOS: tuple[str, ...] = (
+    "yolov8",
+    "resnet",
+    "yolov5",
+    "yolov6",
+    "yolov7",
+    "yolo11",
+    "ppyoloe",
+    "yolov10",
+    "yolox",
+    "yolov8_pose",
+    "RetinaFace",
+    "LPRNet",
+    "yolov8_seg",
+    "yolov5_seg",
+    "ppseg",
+    "mobilenet",
+    "PPOCR_Det",
+    "PPOCR_Rec",
+    "deeplabv3",
+)
+
+
+def runtime_dir() -> Path:
+    """The per-user runtime dir where cam_detect's demo state file lives."""
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
 
 
 # Keep the old dict-based helper for backward compatibility with tests
@@ -107,17 +152,93 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/healthz":
             self._send_json({"ok": True})
             return
+        if parsed.path == "/api/launcher-status":
+            self._send_json(self._launcher_status())
+            return
+        # The launcher is the kiosk home page (ADR-007); the metrics
+        # dashboard moved to /dashboard.
         if parsed.path == "/":
+            self.path = "/launcher.html"
+        elif parsed.path == "/dashboard":
             self.path = "/index.html"
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib hook name
         parsed = urlparse(self.path)
+        if parsed.path == "/api/control/set-cv-demo":
+            self._set_cv_demo()
+            return
         if parsed.path.startswith("/api/control/"):
             action = parsed.path.removeprefix("/api/control/")
             self._run_control_action(action)
             return
         self.send_error(HTTPStatus.NOT_FOUND)
+
+    def _set_cv_demo(self) -> None:
+        """Write the demo state file cam_detect.py polls (plain file, no privilege)."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            demo = body.get("demo") if isinstance(body, dict) else None
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(
+                {"ok": False, "error": "invalid JSON body"}, status=HTTPStatus.BAD_REQUEST
+            )
+            return
+        if demo not in CV_DEMOS:
+            self._send_json(
+                {"ok": False, "error": "unknown demo"}, status=HTTPStatus.BAD_REQUEST
+            )
+            return
+        state_file = runtime_dir() / "cv-demo-current"
+        try:
+            state_file.write_text(f"{demo}\n")
+        except OSError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
+            return
+        self._send_json({"ok": True, "demo": demo})
+
+    def _launcher_status(self) -> dict[str, Any]:
+        active_app = None
+        for name, unit in APP_UNITS.items():
+            try:
+                result = subprocess.run(
+                    ["systemctl", "is-active", "--quiet", unit], timeout=5, check=False
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                active_app = name
+                break
+        battery: dict[str, Any] = {"status": None, "capacity_percent": None}
+        supply = self.server.sampler.root / "sys/class/power_supply/battery"
+        try:
+            battery["status"] = (supply / "status").read_text().strip()
+            battery["capacity_percent"] = int((supply / "capacity").read_text().strip())
+        except (OSError, ValueError):
+            pass
+        power_profile = None
+        try:
+            profile_result = subprocess.run(
+                ["powerprofilesctl", "get"], capture_output=True, text=True, timeout=5, check=False
+            )
+            if profile_result.returncode == 0:
+                power_profile = profile_result.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        cv_demo = None
+        try:
+            name = (runtime_dir() / "cv-demo-current").read_text().strip()
+            cv_demo = name if name in CV_DEMOS else None
+        except OSError:
+            pass
+        return {
+            "active_app": active_app,
+            "battery": battery,
+            "power_profile": power_profile,
+            "cv_demo": cv_demo,
+            "cv_demos": list(CV_DEMOS),
+        }
 
     def _run_control_action(self, action: str) -> None:
         command = CONTROL_ACTIONS.get(action)
