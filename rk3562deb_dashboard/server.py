@@ -70,6 +70,7 @@ CV_DEMOS: tuple[str, ...] = (
     "PPOCR_Det",
     "PPOCR_Rec",
     "deeplabv3",
+    "yolov8_obb",
 )
 
 
