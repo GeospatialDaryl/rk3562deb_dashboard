@@ -34,6 +34,15 @@ Two deliberate deviations from prior rules:
   is a literal mirror of `~/src/camera-npu/demos/__init__.py` to avoid a
   cross-repo import.
 
+## Amendment (2026-07-12)
+
+All state-changing POSTs (`/api/control/*` including `set-cv-demo`, and
+`/api/wifi/*` writes) are accepted **only from 127.0.0.1**. The 2026-07-12
+stability review found the LAN-open control surface allowed any LAN client
+to flip the screen owner or start a heavy CV demo (a documented
+CPU-starvation vector). The kiosk browser talks to 127.0.0.1 so on-panel
+controls are unaffected; the LAN retains the read-only GET surface.
+
 ## Consequences
 
 - The kiosk boots into a launch page with direct-select app tiles; the

@@ -219,6 +219,21 @@ def test_wifi_writes_forbidden_for_remote_clients(
     assert status == 403 and payload["ok"] is False
 
 
+def test_all_posts_forbidden_for_remote_clients(
+    base_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every state-changing POST (not just WiFi) is localhost-only."""
+    from rk3562deb_dashboard import wifi as wifi_module
+
+    monkeypatch.setattr(wifi_module, "is_local", lambda addr: False)
+    for path, body in (
+        ("/api/control/display-off", b""),
+        ("/api/control/set-cv-demo", json.dumps({"demo": "yolov8"}).encode()),
+    ):
+        status, payload = _post(f"{base_url}{path}", body)
+        assert status == 403 and payload["ok"] is False
+
+
 def test_wifi_connect_wrong_password_cleans_up_profile(
     base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

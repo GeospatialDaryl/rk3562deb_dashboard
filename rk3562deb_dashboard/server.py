@@ -185,6 +185,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib hook name
         parsed = urlparse(self.path)
+        # Every POST changes device state (services, screen owner, WiFi,
+        # demo selection) — all of it is only accepted from the device
+        # itself. The LAN gets the read-only GET surface. (2026-07-12
+        # stability review; previously only WiFi writes were guarded.)
+        if not wifi.is_local(self.client_address):
+            self._send_json(
+                {"ok": False, "error": "state changes are only accepted from the device"},
+                status=HTTPStatus.FORBIDDEN,
+            )
+            return
         if parsed.path.startswith("/api/wifi/"):
             self._wifi_post(parsed.path.removeprefix("/api/wifi/"))
             return
@@ -302,14 +312,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self._send_json({"ok": True, "networks": networks})
 
     def _wifi_post(self, action: str) -> None:
-        # Anything that changes network state or carries credentials is only
-        # accepted from the device itself; the LAN gets read-only access.
-        if not wifi.is_local(self.client_address):
-            self._send_json(
-                {"ok": False, "error": "wifi changes are only accepted from the device"},
-                status=HTTPStatus.FORBIDDEN,
-            )
-            return
+        # Localhost enforcement happens for every POST in do_POST.
         body = self._read_json_body()
         if body is None:
             self._send_json(
